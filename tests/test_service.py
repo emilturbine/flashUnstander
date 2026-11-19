@@ -18,8 +18,14 @@ def test_service_persists_stream_and_reuses_context(tmp_path):
             received.append(messages)
             return mock_stream(["hello", " world"], input_tokens=2, output_tokens=3)
 
-        _, first, _ = service.submit(conversation, "first", stream, len)
+        run_id, first, _ = service.submit(conversation, "first", stream, len,
+                                           model="example", parameters={"max_output_tokens": 50})
         await first
+        run = store.run(run_id)
+        assert run["status"] == "complete"
+        assert run["model"] == "example"
+        assert run["input_tokens"] == 2 and run["output_tokens"] == 3
+        assert run["queue_seconds"] is not None and run["first_text_seconds"] is not None
         await asyncio.sleep(0)
         _, second, context = service.submit(conversation, "second", stream, len)
         await second

@@ -4,6 +4,20 @@ from flashunstander.context import select_context
 from flashunstander.storage import Store
 
 
+def test_run_finish_is_atomic_and_recovery_preserves_partial_answer(tmp_path):
+    store = Store(tmp_path / "runs.db")
+    conversation = store.create_conversation()
+    answer = store.add_message(conversation, "assistant", "partial", "streaming")
+    store.create_run("run", conversation, answer)
+    with pytest.raises(KeyError):
+        store.finish_run("missing", answer, "new", "complete")
+    assert store.messages(conversation)[0]["content"] == "partial"
+    store.recover_interrupted()
+    assert store.messages(conversation)[0]["status"] == "interrupted"
+    assert store.run("run")["status"] == "interrupted"
+    store.close()
+
+
 def test_persistence_and_pagination(tmp_path):
     path = tmp_path / "history.db"
     store = Store(path)

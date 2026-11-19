@@ -1,5 +1,6 @@
 """SQLite persistence for conversations and their ordered messages."""
 import sqlite3
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,6 +26,14 @@ class Store:
             );
             CREATE INDEX IF NOT EXISTS messages_conversation_order
                 ON messages(conversation_id, sequence);
+            CREATE TABLE IF NOT EXISTS runs (
+                id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                answer_id TEXT NOT NULL REFERENCES messages(id), status TEXT NOT NULL,
+                model TEXT, parameters TEXT NOT NULL, queue_seconds REAL,
+                first_text_seconds REAL, total_seconds REAL,
+                input_tokens INTEGER, output_tokens INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         columns = {row[1] for row in self.connection.execute("PRAGMA table_info(messages)")}
         if "image_url" not in columns:
@@ -62,6 +71,53 @@ class Store:
             )
             if cursor.rowcount != 1:
                 raise KeyError(message_id)
+
+    def create_run(self, run_id, conversation_id, answer_id, model=None, parameters=None):
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO runs(id,conversation_id,answer_id,status,model,parameters) VALUES (?,?,?,'queued',?,?)",
+                (run_id, conversation_id, answer_id, model, json.dumps(parameters or {}, ensure_ascii=False)),
+            )
+
+    def update_run(self, run_id, *, status, queue_seconds=None, first_text_seconds=None,
+                   total_seconds=None, input_tokens=None, output_tokens=None):
+        with self.connection:
+            self.connection.execute(
+                "UPDATE runs SET status=?, queue_seconds=?, first_text_seconds=?, total_seconds=?, input_tokens=?, output_tokens=? WHERE id=?",
+                (status, queue_seconds, first_text_seconds, total_seconds, input_tokens, output_tokens, run_id),
+            )
+
+    def run(self, run_id):
+        row = self.connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def finish_run(self, run_id, answer_id, content, status, *, queue_seconds=None,
+                   first_text_seconds=None, total_seconds=None, input_tokens=None, output_tokens=None):
+        """Commit the answer and its final metrics together."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE messages SET content=?, status=? WHERE id=?", (content, status, answer_id)
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(answer_id)
+            cursor = self.connection.execute(
+                "UPDATE runs SET status=?, queue_seconds=?, first_text_seconds=?, total_seconds=?, "
+                "input_tokens=?, output_tokens=? WHERE id=? AND answer_id=?",
+                (status, queue_seconds, first_text_seconds, total_seconds, input_tokens,
+                 output_tokens, run_id, answer_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(run_id)
+
+    def recover_interrupted(self):
+        """Mark unfinished work after the owner has established exclusive startup."""
+        with self.connection:
+            self.connection.execute(
+                "UPDATE messages SET status='interrupted' WHERE status IN ('queued','streaming')"
+            )
+            self.connection.execute(
+                "UPDATE runs SET status='interrupted' WHERE status IN ('queued','streaming')"
+            )
 
     def messages(self, conversation_id: str, limit: int = 50, before: int | None = None) -> list[dict]:
         if limit < 1:

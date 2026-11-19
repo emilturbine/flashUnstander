@@ -11,15 +11,16 @@ from functools import lru_cache
 
 import keyring
 from openai import AsyncOpenAI
-from PySide6.QtCore import QObject, Signal, QUrl
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
+from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QLockFile
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .provider import stream_response
 from .scheduler import RequestScheduler
 from .service import ConversationService
 from .storage import Store
 from .window_bridge import WindowBridge
+from .window_manager import WindowManager
+from .desktop import DesktopIntegration
 
 
 @lru_cache(maxsize=1024)
@@ -28,17 +29,15 @@ def count_tokens(text):
     return len(text.encode("utf-8"))
 
 
-class Controller(QObject):
-    event = Signal(object)
+class Runtime(QObject):
+    settingsChanged = Signal(str, str)
 
-    def __init__(self, app, bridge):
+    def __init__(self, directory):
         super().__init__()
-        self.app = app
-        self.bridge = bridge
-        self.directory = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "flashUnstander"
+        self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
         self.config_path = self.directory / "settings.json"
-        self.config = {"provider": "deepseek", "model": "deepseek-flash", "max_output_tokens": 2048}
+        self.config = {"provider": "deepseek", "model": "deepseek-flash", "max_output_tokens": 2048, "hotkey": "Alt+Space"}
         if self.config_path.exists():
             try:
                 self.config.update(json.loads(self.config_path.read_text(encoding="utf-8")))
@@ -47,30 +46,69 @@ class Controller(QObject):
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
-        self.conversation_id = None
-        self.answer = ""
-        self.started = 0.0
-        self.first = None
-        self.queue_seconds = None
-        self.generated_chars = 0
-        bridge.update_state(status="正在加载历史", busy=True)
-        self.event.connect(self._on_event)
         self.ready = asyncio.run_coroutine_threadsafe(self._initialize(), self.loop)
-        bridge.send_handler = self.send
-        bridge.stopRequested.connect(self.stop)
-        bridge.set_settings(self.config["provider"], self.config["model"])
-        bridge.settingsSaved.connect(self.settings)
 
     def _run_loop(self):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
     async def _initialize(self):
+        self.store = Store(self.directory / "history.db")
+        self.store.recover_interrupted()
+        self.service = ConversationService(self.store, RequestScheduler())
+
+    def shutdown(self):
+        async def close():
+            await asyncio.wrap_future(self.ready)
+            await self.service.scheduler.close()
+            self.store.close()
+        future = asyncio.run_coroutine_threadsafe(close(), self.loop)
         try:
-            self.store = Store(self.directory / "history.db")
-            self.service = ConversationService(self.store, RequestScheduler())
-            self.conversation_id = self.store.recent_conversation() or self.store.create_conversation()
-            messages = self.store.messages(self.conversation_id)
+            future.result(timeout=5)
+        finally:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.thread.join(timeout=5)
+
+
+class Controller(QObject):
+    event = Signal(object)
+
+    def __init__(self, app, bridge, runtime, restore=False):
+        super().__init__()
+        self.app = app
+        self.bridge = bridge
+        self.runtime = runtime
+        self.directory = runtime.directory
+        self.restore = restore
+        self.config_path = runtime.config_path
+        self.config = runtime.config
+        self.loop = runtime.loop
+        self.conversation_id = None
+        self.answer = ""
+        self.started = 0.0
+        self.first = None
+        self.queue_seconds = None
+        self.generated_chars = 0
+        self.render_timer = QTimer(self)
+        self.render_timer.setSingleShot(True)
+        self.render_timer.setInterval(40)
+        self.render_timer.timeout.connect(self._render_answer)
+        bridge.update_state(status="正在加载历史", busy=True)
+        self.event.connect(self._on_event)
+        self.ready = asyncio.run_coroutine_threadsafe(self._initialize(), self.loop)
+        bridge.send_handler = self.send
+        bridge.stopRequested.connect(self.stop)
+        bridge.set_settings(self.config["provider"], self.config["model"])
+        runtime.settingsChanged.connect(bridge.set_settings)
+        bridge.settingsSaved.connect(self.settings)
+
+    async def _initialize(self):
+        try:
+            await asyncio.wrap_future(self.runtime.ready)
+            self.service = self.runtime.service
+            store = self.runtime.store
+            self.conversation_id = (store.recent_conversation() if self.restore else None) or store.create_conversation()
+            messages = store.messages(self.conversation_id)
             history = "\n\n".join(("你" if m["role"] == "user" else "助手") + "：" + m["content"] + (" [图片]" if m.get("image_url") else "") for m in messages)
             self.event.emit(("history", history))
         except Exception as exc:
@@ -87,6 +125,7 @@ class Controller(QObject):
             self.config.update(provider=provider, model=model.strip())
             self.config_path.write_text(json.dumps(self.config, ensure_ascii=False, indent=2), encoding="utf-8")
             self.bridge.set_settings(provider, model.strip())
+            self.runtime.settingsChanged.emit(provider, model.strip())
         except Exception as exc:
             QMessageBox.warning(None, "设置失败", str(exc))
 
@@ -125,7 +164,7 @@ class Controller(QObject):
             client = AsyncOpenAI(api_key=key, base_url="https://api.deepseek.com" if config["provider"] == "deepseek" else None, max_retries=0)
             def factory(messages):
                 return stream_response(client, config["provider"], config["model"], messages, config["max_output_tokens"])
-            _, future, context = self.service.submit(self.conversation_id, question, factory, count_tokens, image_url=images[0] if images else None, on_event=self.event.emit)
+            _, future, context = self.service.submit(self.conversation_id, question, factory, count_tokens, image_url=images[0] if images else None, on_event=self.event.emit, model=config["model"], parameters={"provider": config["provider"], "max_output_tokens": config["max_output_tokens"]})
             self.event.emit(("context", f"上下文 {context.turns} 轮，文本约 {context.estimated_tokens} token（不含图片）"))
             await future
         except asyncio.CancelledError:
@@ -160,34 +199,92 @@ class Controller(QObject):
                 self.first = elapsed
             self.answer += event.text
             self.generated_chars += len(event.text)
-            self.bridge.update_state(answer=self.answer, status="生成中", metrics=f"首字 {self.first:.2f}s · {self.generated_chars / max(elapsed, .001):.1f} 字符/s")
+            self.pending_metrics = f"首字 {self.first:.2f}s · {self.generated_chars / max(elapsed, .001):.1f} 字符/s"
+            if not self.render_timer.isActive():
+                self.render_timer.start()
         elif event.kind == "completed":
-            self.bridge.update_state(status="完成", busy=False, metrics=f"排队 {self.queue_seconds or 0:.2f}s · 耗时 {elapsed:.2f}s · 输入 {event.input_tokens if event.input_tokens is not None else '未知'} · 输出 {event.output_tokens if event.output_tokens is not None else '未知'}")
+            self.render_timer.stop()
+            self.bridge.update_state(answer=self.answer, status="完成", busy=False, metrics=f"排队 {self.queue_seconds or 0:.2f}s · 耗时 {elapsed:.2f}s · 输入 {event.input_tokens if event.input_tokens is not None else '未知'} · 输出 {event.output_tokens if event.output_tokens is not None else '未知'}")
         elif event.kind in {"cancelled", "failed"}:
-            self.bridge.update_state(status="已停止" if event.kind == "cancelled" else "请求失败", busy=False)
+            self.render_timer.stop()
+            self.bridge.update_state(answer=self.answer, status="已停止" if event.kind == "cancelled" else "请求失败", busy=False)
 
-    def shutdown(self):
-        async def close():
-            if hasattr(self, "service"):
-                await self.service.scheduler.close()
-                self.store.close()
-        future = asyncio.run_coroutine_threadsafe(close(), self.loop)
-        try:
-            future.result(timeout=5)
-        finally:
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            self.thread.join(timeout=5)
-
+    def _render_answer(self):
+        self.bridge.update_state(answer=self.answer, status="生成中", metrics=self.pending_metrics)
 
 def main():
     app = QApplication([])
-    bridge = WindowBridge()
-    controller = Controller(app, bridge)
-    engine = QQmlApplicationEngine()
-    engine.rootContext().setContextProperty("bridge", bridge)
-    engine.load(QUrl.fromLocalFile(str(Path(__file__).parent / "qml" / "Main.qml")))
-    if not engine.rootObjects():
-        controller.shutdown()
+    app.setQuitOnLastWindowClosed(False)
+    directory = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "flashUnstander"
+    directory.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(directory / "application.lock"))
+    if not lock.tryLock(0):
+        QMessageBox.information(None, "flashUnstander", "程序已运行，请从系统托盘打开窗口。")
         return 1
-    app.aboutToQuit.connect(controller.shutdown)
-    return app.exec()
+    try:
+        runtime = Runtime(directory)
+    except Exception:
+        lock.unlock()
+        raise
+    first = True
+
+    def controller_factory(bridge):
+        nonlocal first
+        controller = Controller(app, bridge, runtime, restore=first)
+        first = False
+        return controller
+
+    manager = WindowManager(controller_factory)
+    try:
+        manager.create_window()
+    except Exception:
+        try:
+            runtime.shutdown()
+        finally:
+            lock.unlock()
+        raise
+    try:
+        desktop = DesktopIntegration(app)
+        desktop.showRequested.connect(manager.show_recent)
+        desktop.newWindowRequested.connect(manager.create_window)
+        desktop.quitRequested.connect(app.quit)
+        bindings = {"Alt+Space": 0x0001, "Ctrl+Alt+Space": 0x0003, "Ctrl+Shift+Space": 0x0006}
+
+        def change_hotkey(value):
+            if value not in bindings:
+                return
+            if value == runtime.config.get("hotkey") and desktop._registered:
+                return
+            if not desktop.register_hotkey(bindings[value], 0x20):
+                for _, _, bridge, _ in manager.windows:
+                    bridge.update_state(status="快捷键注册失败，请选择其他组合")
+                    bridge.set_hotkey(runtime.config["hotkey"])
+                return
+            runtime.config["hotkey"] = value
+            runtime.config_path.write_text(json.dumps(runtime.config, ensure_ascii=False, indent=2), encoding="utf-8")
+            for _, _, bridge, _ in manager.windows:
+                bridge.set_hotkey(value)
+
+        def connect_window(window):
+            bridge = next(item[2] for item in manager.windows if item[0] is window)
+            bridge.set_hotkey(runtime.config["hotkey"])
+            bridge.hotkeyRequested.connect(change_hotkey)
+
+        manager.windowCreated.connect(connect_window)
+        connect_window(manager.windows[0][0])
+        saved_hotkey = runtime.config.get("hotkey", "Alt+Space")
+        if saved_hotkey not in bindings:
+            saved_hotkey = "Alt+Space"
+            runtime.config["hotkey"] = saved_hotkey
+        if not desktop.register_hotkey(bindings[saved_hotkey], 0x20):
+            manager.windows[0][2].update_state(status="全局快捷键不可用，可通过托盘打开窗口")
+        return app.exec()
+    finally:
+        try:
+            if 'desktop' in locals():
+                desktop.close()
+        finally:
+            try:
+                runtime.shutdown()
+            finally:
+                lock.unlock()

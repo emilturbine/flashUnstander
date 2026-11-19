@@ -30,7 +30,8 @@ class ConversationService:
         self._active = {}
 
     def submit(self, conversation_id, question, stream_factory, count_tokens: Callable,
-               *, system="", budget=16000, max_turns=10, on_event=None, image_url=None):
+               *, system="", budget=16000, max_turns=10, on_event=None, image_url=None,
+               model=None, parameters=None):
         if conversation_id in self._active:
             raise ValueError("conversation already has a pending request")
         if not question.strip() and not image_url:
@@ -42,16 +43,34 @@ class ConversationService:
         run_id = uuid4().hex
         self.store.add_message(conversation_id, "user", question, image_url=image_url)
         answer_id = self.store.add_message(conversation_id, "assistant", "", "queued")
+        self.store.create_run(run_id, conversation_id, answer_id, model, parameters)
         self._active[conversation_id] = run_id
         started = False
+        submitted_at = time.monotonic()
+        queue_seconds = None
+        first_text_seconds = None
+
+        def record(status, input_tokens=None, output_tokens=None):
+            self.store.update_run(run_id, status=status, queue_seconds=queue_seconds,
+                                  first_text_seconds=first_text_seconds,
+                                  total_seconds=time.monotonic() - submitted_at,
+                                  input_tokens=input_tokens, output_tokens=output_tokens)
+
+        def finish(status, text, input_tokens=None, output_tokens=None):
+            self.store.finish_run(run_id, answer_id, text, status, queue_seconds=queue_seconds,
+                                  first_text_seconds=first_text_seconds,
+                                  total_seconds=time.monotonic() - submitted_at,
+                                  input_tokens=input_tokens, output_tokens=output_tokens)
 
         def emit(kind, text="", input_tokens=None, output_tokens=None):
             if on_event:
                 on_event(ServiceEvent(run_id, conversation_id, kind, text, input_tokens, output_tokens))
 
         async def run():
-            nonlocal started
+            nonlocal started, queue_seconds, first_text_seconds
             started = True
+            queue_seconds = time.monotonic() - submitted_at
+            record("streaming")
             text = ""
             last_saved = time.monotonic()
             self.store.update_message(answer_id, text, "streaming")
@@ -59,22 +78,24 @@ class ConversationService:
             try:
                 async for event in stream_factory(context.messages):
                     if event.kind == "text":
+                        if first_text_seconds is None:
+                            first_text_seconds = time.monotonic() - submitted_at
                         text += event.text
                         if time.monotonic() - last_saved >= 1:
                             self.store.update_message(answer_id, text, "streaming")
                             last_saved = time.monotonic()
                         emit("text", event.text)
                     elif event.kind == "completed":
-                        self.store.update_message(answer_id, text, "complete")
+                        finish("complete", text, event.input_tokens, event.output_tokens)
                         emit("completed", input_tokens=event.input_tokens, output_tokens=event.output_tokens)
                         return
                 raise RuntimeError("stream ended without completion")
             except asyncio.CancelledError:
-                self.store.update_message(answer_id, text, "cancelled")
+                finish("cancelled", text)
                 emit("cancelled")
                 raise
             except Exception:
-                self.store.update_message(answer_id, text, "failed")
+                finish("failed", text)
                 emit("failed")
                 raise
 
@@ -82,12 +103,12 @@ class ConversationService:
             future = self.scheduler.submit(conversation_id, run)
         except Exception:
             self._active.pop(conversation_id, None)
-            self.store.update_message(answer_id, "", "failed")
+            finish("failed", "")
             raise
 
         def finished(done):
             if done.cancelled() and not started:
-                self.store.update_message(answer_id, "", "cancelled")
+                finish("cancelled", "")
                 emit("cancelled")
             if self._active.get(conversation_id) == run_id:
                 self._active.pop(conversation_id, None)
