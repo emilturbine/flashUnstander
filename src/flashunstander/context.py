@@ -39,6 +39,10 @@ def select_context(history: Sequence[Mapping], system: str, question: str,
     if system:
         messages.append({"role": "system", "content": system})
     for user, assistant in reversed(selected):
-        messages.extend({"role": item["role"], "content": item["content"]} for item in (user, assistant))
+        for item in (user, assistant):
+            message = {"role": item["role"], "content": item["content"]}
+            if item.get("image_url"):
+                message["image_url"] = item["image_url"]
+            messages.append(message)
     messages.append({"role": "user", "content": question})
     return Context(messages, len(selected), total)

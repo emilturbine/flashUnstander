@@ -26,9 +26,19 @@ class Store:
             CREATE INDEX IF NOT EXISTS messages_conversation_order
                 ON messages(conversation_id, sequence);
         """)
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(messages)")}
+        if "image_url" not in columns:
+            self.connection.execute("ALTER TABLE messages ADD COLUMN image_url TEXT")
+            self.connection.commit()
 
     def close(self):
         self.connection.close()
+
+    def recent_conversation(self) -> str | None:
+        row = self.connection.execute(
+            "SELECT id FROM conversations ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        return row[0] if row else None
 
     def create_conversation(self, title: str = "新会话") -> str:
         identifier = uuid4().hex
@@ -36,12 +46,12 @@ class Store:
             self.connection.execute("INSERT INTO conversations(id,title) VALUES (?,?)", (identifier, title))
         return identifier
 
-    def add_message(self, conversation_id: str, role: str, content: str, status: str = "complete") -> str:
+    def add_message(self, conversation_id: str, role: str, content: str, status: str = "complete", image_url: str | None = None) -> str:
         identifier = uuid4().hex
         with self.connection:
             self.connection.execute(
-                "INSERT INTO messages(id,conversation_id,role,content,status) VALUES (?,?,?,?,?)",
-                (identifier, conversation_id, role, content, status),
+                "INSERT INTO messages(id,conversation_id,role,content,status,image_url) VALUES (?,?,?,?,?,?)",
+                (identifier, conversation_id, role, content, status, image_url),
             )
         return identifier
 

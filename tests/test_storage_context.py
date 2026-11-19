@@ -30,3 +30,16 @@ def test_budget_keeps_complete_recent_turns():
     assert [item["content"] for item in result.messages] == ["new", "ok", "?"]
     with pytest.raises(ValueError):
         select_context([], "system", "question", len, budget=1)
+
+
+def test_image_survives_reopen_and_context(tmp_path):
+    path = tmp_path / "history.db"
+    store = Store(path)
+    conversation = store.create_conversation()
+    store.add_message(conversation, "user", "describe", image_url="data:image/png;base64,YQ==")
+    store.add_message(conversation, "assistant", "image")
+    store.close()
+    store = Store(path)
+    context = select_context(store.messages(conversation), "", "more", len)
+    assert context.messages[0]["image_url"] == "data:image/png;base64,YQ=="
+    store.close()
