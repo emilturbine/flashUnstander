@@ -85,9 +85,13 @@ class ConversationService:
                             self.store.update_message(answer_id, text, "streaming")
                             last_saved = time.monotonic()
                         emit("text", event.text)
-                    elif event.kind == "completed":
-                        finish("complete", text, event.input_tokens, event.output_tokens)
-                        emit("completed", input_tokens=event.input_tokens, output_tokens=event.output_tokens)
+                    elif event.kind in {"reasoning", "search"}:
+                        # Process details are for this window only, not assistant context.
+                        emit(event.kind, event.text)
+                    elif event.kind in {"completed", "truncated"}:
+                        status = "complete" if event.kind == "completed" else "truncated"
+                        finish(status, text, event.input_tokens, event.output_tokens)
+                        emit(event.kind, input_tokens=event.input_tokens, output_tokens=event.output_tokens)
                         return
                 raise RuntimeError("stream ended without completion")
             except asyncio.CancelledError:

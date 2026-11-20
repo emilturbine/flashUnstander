@@ -6,10 +6,11 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 class ControlBridge(QObject):
     windowsChanged = Signal()
 
-    def __init__(self, manager, quit_app):
+    def __init__(self, manager, quit_app, open_settings=None):
         super().__init__()
         self._manager = manager
         self._quit_app = quit_app
+        self._open_settings = open_settings
         manager.windowsChanged.connect(self.windowsChanged)
 
     @Property(int, notify=windowsChanged)
@@ -31,6 +32,11 @@ class ControlBridge(QObject):
     @Slot()
     def showAll(self):
         self._manager.show_all()
+
+    @Slot()
+    def openSettings(self):
+        if self._open_settings:
+            self._open_settings()
 
     @Slot()
     def quit(self):

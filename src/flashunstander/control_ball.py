@@ -21,9 +21,9 @@ class ControlBall(QPushButton):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName("打开 flashUnstander 问答")
+        self.setAccessibleName("新建 flashUnstander 问答窗口")
         self.setWindowTitle("flashUnstander 中控")
-        self.clicked.connect(controls.openRecent)
+        self.clicked.connect(controls.openNew)
         controls.windowsChanged.connect(self._refresh_tooltip)
         self._refresh_tooltip()
         self.setFixedSize(42, 42)
@@ -38,7 +38,7 @@ class ControlBall(QPushButton):
         self.move(area.right() - self.width() - 12, area.bottom() - self.height() - 12)
 
     def _refresh_tooltip(self):
-        shortcut = "Alt+Shift+W 打开窗口" if self.shortcut_available else "Alt+Shift+W 注册失败"
+        shortcut = "Alt+Shift+W 新建窗口" if self.shortcut_available else "Alt+Shift+W 注册失败"
         self.setToolTip(
             f"flashUnstander · 已显示 {self.controls.visibleCount}/{self.controls.windowCount} 个窗口\n{shortcut}"
         )
@@ -76,6 +76,7 @@ class ControlBall(QPushButton):
         menu.addAction("打开最近窗口", self.controls.openRecent)
         menu.addAction("新建问答窗", self.controls.openNew)
         menu.addAction("显示全部窗口", self.controls.showAll).setEnabled(self.controls.windowCount > 0)
+        menu.addAction("设置", self.controls.openSettings)
         menu.addSeparator()
         menu.addAction("退出", self.controls.quit)
         menu.exec(event.globalPos())

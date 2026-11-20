@@ -4,6 +4,18 @@ from flashunstander.context import select_context
 from flashunstander.storage import Store
 
 
+def test_context_can_select_rounds_near_100k_budget():
+    history = [
+        {"role": role, "content": "x" * 24_000, "status": "complete"}
+        for _ in range(3) for role in ("user", "assistant")
+    ]
+    context = select_context(history, "", "question", len, budget=100_000, max_turns=5)
+    assert context.turns == 2
+    assert context.estimated_tokens == 96_008
+    no_history = select_context(history, "", "question", len, budget=100_000, max_turns=0)
+    assert no_history.turns == 0
+
+
 def test_run_finish_is_atomic_and_recovery_preserves_partial_answer(tmp_path):
     store = Store(tmp_path / "runs.db")
     conversation = store.create_conversation()

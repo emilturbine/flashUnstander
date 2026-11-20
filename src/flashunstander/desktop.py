@@ -22,14 +22,14 @@ class _HotkeyFilter(QAbstractNativeEventFilter):
         if event_type == b"windows_generic_MSG" or event_type == b"windows_dispatcher_MSG":
             msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
             if msg.message == 0x0312 and msg.wParam == self.owner._hotkey_id:
-                self.owner.showRequested.emit()
+                self.owner.hotkeyRequested.emit()
                 return True, 0
         return False, 0
 
 
 class DesktopIntegration(QObject):
     showRequested = Signal()
-    newWindowRequested = Signal()
+    hotkeyRequested = Signal()
     quitRequested = Signal()
 
     def __init__(self, app, parent=None):
@@ -41,7 +41,6 @@ class DesktopIntegration(QObject):
         self.app.installNativeEventFilter(self._filter)
         self.menu = QMenu()
         for label, signal in (("显示窗口", self.showRequested),
-                              ("新建窗口", self.newWindowRequested),
                               ("退出", self.quitRequested)):
             action = QAction(label, self.menu)
             action.triggered.connect(lambda checked=False, target=signal: target.emit())

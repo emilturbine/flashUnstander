@@ -20,25 +20,46 @@ ApplicationWindow {
     signal newWindowRequested()
     onClosing: function(close) { close.accepted = false; window.hide() }
 
-    Dialog {
-        id: settingsDialog
-        title: "模型设置"
-        modal: true
-        anchors.centerIn: parent
-        standardButtons: Dialog.Save | Dialog.Cancel
-        onOpened: {
-            providerBox.currentIndex = bridge.provider === "openai" ? 1 : 0
-            modelInput.text = bridge.model
-            keyInput.text = ""
+    ListModel { id: messageModel }
+
+    function syncMessages() {
+        const rows = bridge.messages
+        const followBottom = answers.contentItem.atYEnd
+            || answers.contentItem.contentHeight - answers.contentItem.height - answers.contentItem.contentY <= 24
+        answers.followBottomOnChange = followBottom
+        if (messageModel.count > rows.length)
+            messageModel.remove(rows.length, messageModel.count - rows.length)
+        for (let i = 0; i < rows.length; ++i) {
+            const row = {
+                senderRole: rows[i].role || "",
+                body: rows[i].text || "",
+                richBody: rows[i].formatted || "",
+                trace: rows[i].process || "",
+                messageStatus: rows[i].status || ""
+            }
+            if (i === messageModel.count) {
+                messageModel.append(row)
+            } else {
+                const previous = messageModel.get(i)
+                for (const key of Object.keys(row))
+                    if (previous[key] !== row[key])
+                        messageModel.setProperty(i, key, row[key])
+            }
         }
-        onAccepted: bridge.saveSettings(providerBox.currentText, modelInput.text, keyInput.text)
-        contentItem: ColumnLayout {
-            Label { text: "服务商" }
-            ComboBox { id: providerBox; model: ["deepseek", "openai"]; Layout.fillWidth: true }
-            Label { text: "模型名称" }
-            TextField { id: modelInput; Layout.fillWidth: true }
-            Label { text: "API Key（留空保留已保存的密钥）" }
-            TextField { id: keyInput; echoMode: TextInput.Password; Layout.fillWidth: true }
+        if (followBottom)
+            Qt.callLater(answers.scrollToBottom)
+    }
+
+    Component.onCompleted: syncMessages()
+    Connections {
+        target: bridge
+        function onMessagesChanged() { window.syncMessages() }
+    }
+
+    function submitPrompt() {
+        if (bridge.send(prompt.text, window.imagePath)) {
+            prompt.clear()
+            window.imagePath = ""
         }
     }
 
@@ -68,31 +89,120 @@ ApplicationWindow {
                     onPressed: window.startSystemMove()
                 }
             }
-            Button { text: "+"; onClicked: window.newWindowRequested() }
+            Button { text: "+"; visible: false; onClicked: window.newWindowRequested() }
             Button { text: window.lightTheme ? "深色" : "浅色"; onClicked: window.lightTheme = !window.lightTheme }
-            Button { text: "设置"; enabled: !bridge.busy; onClicked: { bridge.openSettings(); settingsDialog.open() } }
             Button { text: "─"; Accessible.name: "最小化"; onClicked: window.showMinimized() }
             Button { text: "×"; Accessible.name: "关闭"; onClicked: window.close() }
         }
         ScrollView {
+            id: answers
             objectName: "answerScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            TextArea {
-                text: bridge.answer
-                textFormat: TextEdit.PlainText
-                readOnly: true
-                selectByMouse: true
-                wrapMode: TextEdit.Wrap
-                color: window.foreground
-                background: Rectangle { color: window.surface; radius: 10 }
+            property bool followBottomOnChange: true
+
+            function scrollToBottom() {
+                contentItem.contentY = Math.max(0, contentItem.contentHeight - contentItem.height)
+            }
+
+            Column {
+                width: answers.availableWidth
+                spacing: 7
+                onImplicitHeightChanged: {
+                    if (answers.followBottomOnChange)
+                        Qt.callLater(answers.scrollToBottom)
+                }
+                Repeater {
+                    model: messageModel
+                    delegate: Item {
+                        id: message
+                        required property string senderRole
+                        required property string body
+                        required property string richBody
+                        required property string trace
+                        required property string messageStatus
+                        property bool expanded: false
+                        readonly property bool fromUser: senderRole === "user"
+                        width: answers.availableWidth
+                        height: bubble.height
+
+                        Rectangle {
+                            id: bubble
+                            anchors.right: message.fromUser ? parent.right : undefined
+                            anchors.left: message.fromUser ? undefined : parent.left
+                            width: parent.width * 0.85
+                            height: bubbleContent.implicitHeight + 14
+                            color: message.fromUser ? (window.lightTheme ? "#dce9ff" : "#29466c") : window.surface
+                            radius: 8
+
+                            ColumnLayout {
+                                id: bubbleContent
+                                x: 8
+                                y: 7
+                                width: bubble.width - 16
+                                spacing: 3
+                                Label {
+                                    text: message.fromUser ? "你" : "助手"
+                                    color: window.muted
+                                    font.pixelSize: 11
+                                }
+                                ToolButton {
+                                    visible: !message.fromUser && message.trace !== ""
+                                    text: message.expanded ? "▾ 思考和搜索过程" : "▸ 思考和搜索过程"
+                                    onClicked: {
+                                        answers.followBottomOnChange = false
+                                        message.expanded = !message.expanded
+                                    }
+                                }
+                                TextArea {
+                                    objectName: "processDetails"
+                                    visible: !message.fromUser && message.expanded && message.trace !== ""
+                                    Layout.fillWidth: true
+                                    text: message.trace
+                                    textFormat: TextEdit.PlainText
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextEdit.Wrap
+                                    color: window.muted
+                                    padding: 0
+                                    background: null
+                                }
+                                TextArea {
+                                    visible: text !== ""
+                                    Layout.fillWidth: true
+                                    text: !message.fromUser && message.richBody ? message.richBody : message.body
+                                    textFormat: !message.fromUser && message.richBody ? TextEdit.RichText : TextEdit.PlainText
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextEdit.Wrap
+                                    color: window.foreground
+                                    padding: 0
+                                    background: null
+                                }
+                                Label {
+                                    visible: text !== ""
+                                    text: ({
+                                        queued: "排队中",
+                                        streaming: "生成中",
+                                        truncated: "已达输出上限",
+                                        failed: "请求失败",
+                                        cancelled: "已停止"
+                                    })[message.messageStatus] || ""
+                                    color: window.muted
+                                    font.pixelSize: 11
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         Label { visible: window.imagePath !== ""; text: "已选择图片"; color: window.muted }
         ScrollView {
+            id: promptScroll
             objectName: "promptScroll"
             Layout.fillWidth: true
             Layout.preferredHeight: 34
@@ -101,6 +211,14 @@ ApplicationWindow {
             clip: true
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            function showCaret() {
+                const view = contentItem
+                const caret = prompt.cursorRectangle
+                const bottom = caret.y + caret.height + 2
+                const target = caret.y < view.contentY ? caret.y
+                    : bottom > view.contentY + view.height ? bottom - view.height : view.contentY
+                view.contentY = Math.max(0, Math.min(target, view.contentHeight - view.height))
+            }
             TextArea {
                 id: prompt
                 objectName: "prompt"
@@ -109,23 +227,43 @@ ApplicationWindow {
                 color: window.foreground
                 placeholderTextColor: "#8290a5"
                 background: Rectangle { color: window.surface; radius: 8 }
+                onCursorRectangleChanged: Qt.callLater(promptScroll.showCaret)
                 Keys.onReturnPressed: function(event) {
                     if (!event.isAutoRepeat && !prompt.inputMethodComposing && !(event.modifiers & Qt.ShiftModifier) && !bridge.busy && (prompt.text.trim() !== "" || window.imagePath !== "")) {
-                        if (bridge.send(prompt.text, window.imagePath)) {
-                            prompt.clear()
-                            window.imagePath = ""
-                        }
+                        window.submitPrompt()
                         event.accepted = true
                     }
                 }
             }
         }
         RowLayout {
-            Button { text: "添加图片"; enabled: !bridge.busy; onClicked: imageDialog.open() }
-            Button { text: "移除图片"; visible: window.imagePath !== ""; onClicked: window.imagePath = "" }
+            ToolButton {
+                text: window.imagePath === "" ? "图片" : "移除图片"
+                enabled: !bridge.busy
+                onClicked: {
+                    if (window.imagePath === "")
+                        imageDialog.open()
+                    else
+                        window.imagePath = ""
+                }
+            }
+            ToolButton {
+                text: "思考"
+                checkable: true
+                checked: bridge.thinkingEnabled
+                enabled: bridge.thinkingAvailable && !bridge.busy
+                onClicked: bridge.setThinking(checked)
+            }
+            ToolButton {
+                text: "搜索"
+                checkable: true
+                checked: bridge.searchEnabled
+                enabled: bridge.searchAvailable && !bridge.busy
+                onClicked: bridge.setSearch(checked)
+            }
             Item { Layout.fillWidth: true }
             Button { text: "停止"; visible: bridge.busy; onClicked: bridge.stop() }
-            Button { text: "发送"; enabled: !bridge.busy && (prompt.text.trim() !== "" || window.imagePath !== ""); onClicked: { if (bridge.send(prompt.text, window.imagePath)) { prompt.clear(); window.imagePath = "" } } }
+            Button { text: "发送"; enabled: !bridge.busy && (prompt.text.trim() !== "" || window.imagePath !== ""); onClicked: window.submitPrompt() }
         }
         Label { text: bridge.status + (bridge.metrics ? "  ·  " + bridge.metrics : ""); color: window.muted; Layout.fillWidth: true; elide: Text.ElideRight }
     }

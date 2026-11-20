@@ -12,13 +12,17 @@
 - `src/flashunstander/desktop.py`：Windows 全局热键及托盘。
 - `src/flashunstander/control_bridge.py`：中控操作及窗口可见状态接口。
 - `src/flashunstander/control_ball.py`：默认中控球外观及圆形点击范围。
+- `src/flashunstander/settings_dialog.py`：中控设置表单和上下文默认值。
+- `src/flashunstander/formatting.py`：离线 Markdown、JSON 和基础 LaTeX 渲染。
 - `src/flashunstander/window_manager.py`：窗口实例与控制器绑定。
 - `src/flashunstander/window_bridge.py`、`qml/Main.qml`：单窗口接口及界面初稿。
 - `tests/test_storage_context.py`：持久化、分页及上下文预算测试。
 - `tests/test_scheduler.py`：并发、排队、取消及会话排他测试。
 - `tests/test_mock_stream.py`：模拟流测试。
 - `tests/test_provider.py`、`tests/test_service.py`：供应商适配及会话服务测试。
+- `tests/test_formatting.py`：消息格式转换及外部资源过滤。
 - `tests/desktop_smoke.py`：单独运行的 Windows 可见窗口、模拟并发及热键冲突验证。
+- `tests/exit_smoke.py`：验证正常退出释放实例锁和 SQLite 文件句柄。
 - `examples/README.md`：自定义窗口接口示例说明。
 - `docs/PROGRESS.md`：阶段进度、设计决定和测试授权记录。
 - `scripts/build-windows.ps1`：目录版和安装包的构建入口。

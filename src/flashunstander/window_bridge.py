@@ -1,8 +1,11 @@
 """Stable Qt boundary between a window and the conversation controller."""
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from .provider import supports_search, supports_thinking
+
 
 class WindowBridge(QObject):
+    messagesChanged = Signal()
     sendRequested = Signal(str, str)
     stopRequested = Signal()
     settingsRequested = Signal()
@@ -17,7 +20,44 @@ class WindowBridge(QObject):
         self._busy = False
         self._provider = "deepseek"
         self._model = "deepseek-flash"
+        self._messages = []
+        self._thinking = False
+        self._search = False
         self.send_handler = None
+
+    @Property("QVariantList", notify=messagesChanged)
+    def messages(self):
+        return self._messages
+
+    def set_messages(self, messages):
+        self._messages = list(messages)
+        self.messagesChanged.emit()
+
+    @Property(bool, notify=stateChanged)
+    def thinkingAvailable(self):
+        return supports_thinking(self._provider, self._model)
+
+    @Property(bool, notify=stateChanged)
+    def searchAvailable(self):
+        return supports_search(self._provider, self._model)
+
+    @Property(bool, notify=stateChanged)
+    def thinkingEnabled(self):
+        return self._thinking and self.thinkingAvailable
+
+    @Property(bool, notify=stateChanged)
+    def searchEnabled(self):
+        return self._search and self.searchAvailable
+
+    @Slot(bool)
+    def setThinking(self, enabled):
+        self._thinking = enabled and self.thinkingAvailable
+        self.stateChanged.emit()
+
+    @Slot(bool)
+    def setSearch(self, enabled):
+        self._search = enabled and self.searchAvailable
+        self.stateChanged.emit()
 
     @Property(str, notify=stateChanged)
     def provider(self):
@@ -28,6 +68,8 @@ class WindowBridge(QObject):
         return self._model
 
     def set_settings(self, provider, model):
+        if (provider, model) != (self._provider, self._model):
+            self._thinking = self._search = False
         self._provider = provider
         self._model = model
         self.stateChanged.emit()

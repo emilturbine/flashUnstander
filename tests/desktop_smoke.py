@@ -20,6 +20,7 @@ from flashunstander.control_ball import ControlBall
 from flashunstander.control_bridge import ControlBridge
 from flashunstander.desktop import DesktopIntegration
 from flashunstander.provider import StreamEvent
+from flashunstander.settings_dialog import SettingsDialog
 from flashunstander.window_manager import WindowManager
 
 
@@ -31,7 +32,11 @@ class FakeClient:
         pass
 
 
-async def fake_stream(client, provider, model, messages, max_tokens):
+async def fake_stream(client, provider, model, messages, max_tokens, **options):
+    if options.get("thinking"):
+        yield StreamEvent("reasoning", "模拟思考")
+    if options.get("search"):
+        yield StreamEvent("search", "\n模拟搜索\n")
     yield StreamEvent("text", f"回复 {messages[-1]['content']}")
     await asyncio.sleep(2)
     yield StreamEvent("completed", input_tokens=5, output_tokens=7)
@@ -64,6 +69,12 @@ def check_hotkey_conflict(desktop):
     assert desktop.register_hotkey(modifiers, competing_key)
 
 
+def visual_children(item):
+    for child in item.childItems():
+        yield child
+        yield from visual_children(child)
+
+
 def check_native_windows(ball, window):
     ball_handle = int(ball.winId())
     left, top, right, bottom = win32gui.GetWindowRect(ball_handle)
@@ -74,11 +85,6 @@ def check_native_windows(ball, window):
     style = win32gui.GetWindowLong(window_handle, win32con.GWL_STYLE)
     assert style & win32con.WS_CAPTION == 0
     assert window.findChild(QQuickItem, "windowDragRegion").width() > 0
-    def visual_children(item):
-        for child in item.childItems():
-            yield child
-            yield from visual_children(child)
-
     assert sum(item.objectName() == "windowResizeRegion"
                for item in visual_children(window.contentItem())) == 8
 
@@ -109,14 +115,20 @@ def check_scroll(app, window, bridge):
     long_text = "\n".join(f"第 {index} 行" for index in range(80))
     prompt.setProperty("text", long_text)
     prompt.setProperty("cursorPosition", len(long_text))
-    bridge.update_state(answer=long_text)
+    row = {"role": "assistant", "text": long_text, "formatted": "",
+           "status": "complete", "process": ""}
+    bridge.set_messages([row])
     wait_for(app, lambda: all(item.property("contentHeight") > item.property("height")
                              for item in (prompt_scroll, answer_scroll)), "scrollable text")
     wait_for(app, lambda: prompt_scroll.property("contentY") > 0, "input follows caret")
+    wait_for(app, lambda: answer_scroll.property("atYEnd"), "answer follows latest message")
     answer_scroll.setProperty("contentY", 50)
     assert answer_scroll.property("contentY") == 50
+    bridge.set_messages([dict(row, text=long_text + "\n新增内容")])
+    QTest.qWait(100)
+    assert abs(answer_scroll.property("contentY") - 50) < 1, "manual scroll must stay put"
     prompt.setProperty("text", "")
-    bridge.update_state(answer="")
+    bridge.set_messages([])
 
 
 def main():
@@ -129,20 +141,30 @@ def main():
             check_hotkey_conflict(desktop)
             assert desktop.register_hotkey(), "Alt+Shift+W registration"
             manager = WindowManager(lambda bridge: Controller(app, bridge, runtime))
-            controls = ControlBridge(manager, app.quit)
+            dialogs = []
+            controls = ControlBridge(manager, app.quit, lambda: dialogs.append(SettingsDialog(runtime)))
+            controls.openSettings()
+            dialog = dialogs.pop()
+            assert dialog.context.value() == 100_000
+            assert dialog.turns.value() == 20
+            dialog.context.setValue(80_000)
+            dialog.turns.setValue(30)
+            dialog._save()
+            assert runtime.config["context_tokens"] == 80_000
+            assert runtime.config["context_turns"] == 30
             ball = ControlBall(app, controls)
             desktop.showRequested.connect(manager.show_recent)
-            desktop.newWindowRequested.connect(manager.create_window)
+            desktop.hotkeyRequested.connect(controls.openNew)
             ball.show()
             assert controls.windowCount == 0
             assert ball.mask().contains(ball.rect().center())
             assert not ball.mask().contains(QPoint(0, 0))
             check_ball_drag(ball, controls)
-            win32api.PostThreadMessage(win32api.GetCurrentThreadId(), win32con.WM_HOTKEY,
-                                       desktop._hotkey_id, (0x57 << 16) | 0x0005)
-            wait_for(app, lambda: controls.windowCount == 1, "global hotkey opened chat")
-            for _ in range(3):
-                manager.windows[-1][0].newWindowRequested.emit()
+            for expected in range(1, 4):
+                win32api.PostThreadMessage(win32api.GetCurrentThreadId(), win32con.WM_HOTKEY,
+                                           desktop._hotkey_id, (0x57 << 16) | 0x0005)
+                wait_for(app, lambda: controls.windowCount == expected, "global hotkey opened a new chat")
+            ball.click()
             windows = manager.windows
             assert len(windows) == 4
             wait_for(app, lambda: all(not item[2].busy for item in windows), "window startup")
@@ -169,6 +191,8 @@ def main():
                 patch("flashunstander.app.stream_response", fake_stream),
                 patch("flashunstander.app.keyring.get_password", return_value="test"),
             ):
+                last_bridge.setThinking(True)
+                last_bridge.setSearch(True)
                 for index, (_, _, bridge, _) in enumerate(windows):
                     assert bridge.send(f"第{index}问", "")
                 wait_for(app, lambda: all("回复" in item[2].answer for item in windows[:3]), "parallel streams")
@@ -181,6 +205,13 @@ def main():
                     assert f"回复 第{index}问" in bridge.answer
                     assert all(f"回复 第{other}问" not in bridge.answer for other in range(4) if other != index)
                 assert "输入 5" in last_bridge.metrics and "输出 7" in last_bridge.metrics
+                assert [row["role"] for row in last_bridge.messages] == ["user", "assistant"]
+                assert "模拟思考" in last_bridge.messages[-1]["process"]
+                assert "模拟搜索" in last_bridge.messages[-1]["process"]
+                assert "模拟思考" not in last_bridge.messages[-1]["formatted"]
+                details = [item for item in visual_children(last.contentItem())
+                           if item.objectName() == "processDetails"]
+                assert details and all(not item.isVisible() for item in details)
             print("Frameless controls, ball drag/hit test, hotkey routing, scrolling and four-window streaming passed.")
         finally:
             desktop.close()

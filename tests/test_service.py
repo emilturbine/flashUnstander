@@ -1,6 +1,7 @@
 import asyncio
 
 from flashunstander.mock_stream import mock_stream
+from flashunstander.provider import StreamEvent
 from flashunstander.scheduler import RequestScheduler
 from flashunstander.service import ConversationService
 from flashunstander.storage import Store
@@ -34,5 +35,33 @@ def test_service_persists_stream_and_reuses_context(tmp_path):
         assert store.messages(conversation)[-1]["status"] == "complete"
         await scheduler.close()
         store.close()
+
+    asyncio.run(scenario())
+
+
+def test_process_events_stay_out_of_persisted_answer(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / "history.db")
+        conversation = store.create_conversation()
+        scheduler = RequestScheduler()
+        service = ConversationService(store, scheduler)
+        observed = []
+
+        async def generate(_messages):
+            yield StreamEvent("reasoning", "process details")
+            yield StreamEvent("search", "search details")
+            yield StreamEvent("text", "partial answer")
+            yield StreamEvent("truncated", input_tokens=10, output_tokens=20)
+
+        try:
+            run_id, future, _ = service.submit(conversation, "question", generate, len, on_event=observed.append)
+            await future
+            assert [event.kind for event in observed] == ["started", "reasoning", "search", "text", "truncated"]
+            assert store.messages(conversation)[-1]["content"] == "partial answer"
+            assert store.run(run_id)["status"] == "truncated"
+            assert store.run(run_id)["output_tokens"] == 20
+        finally:
+            await scheduler.close()
+            store.close()
 
     asyncio.run(scenario())

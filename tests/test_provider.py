@@ -3,7 +3,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from flashunstander.provider import stream_response, supports_images
+from flashunstander.provider import stream_response, supports_images, supports_search
 
 
 class FakeStream:
@@ -38,7 +38,47 @@ def test_deepseek_image_stream_and_usage():
         assert events[0].text == "hi"
         assert events[-1].input_tokens == 12
         assert args["messages"][0]["content"][1]["type"] == "image_url"
+        assert args["extra_body"] == {"thinking": {"type": "disabled"}}
         assert stream.closed
+    asyncio.run(scenario())
+
+
+def test_deepseek_thinking_web_search_and_length():
+    async def scenario():
+        assert supports_search("deepseek", "deepseek-flash")
+        assert not supports_search("deepseek", "deepseek-v4-pro")
+        search_call = {"action": {"type": "search", "queries": ["a query"]}}
+        finished_call = dict(search_call, status="completed", sources=[{"title": "a source"}])
+        stream = FakeStream([
+            NS(usage=None, choices=[NS(delta=NS(reasoning_content="think"), finish_reason=None)]),
+            NS(usage=None, choices=[NS(delta=NS(), finish_reason=None,
+                                       server_tool_event={"type": "call_started", "call": search_call})]),
+            NS(usage=None, choices=[NS(delta=NS(), finish_reason=None,
+                                       server_tool_event={"type": "call_completed", "call": finished_call})]),
+            NS(usage=None, choices=[NS(delta=NS(content="partial text"), finish_reason="length")]),
+            NS(usage=NS(prompt_tokens=12, completion_tokens=20), choices=[]),
+        ])
+        arguments = {}
+
+        async def create(**kwargs):
+            arguments.update(kwargs)
+            return stream
+
+        client = NS(chat=NS(completions=NS(create=create)))
+        messages = [{"role": "user", "content": "look it up"}]
+        events = [event async for event in stream_response(
+            client, "deepseek", "deepseek-flash", messages, 20, thinking=True, search=True,
+        )]
+        assert arguments["extra_body"] == {
+            "thinking": {"type": "enabled"},
+            "tools": [{"type": "deepseek_web_search"}],
+        }
+        assert [event.kind for event in events] == ["reasoning", "search", "search", "text", "truncated"]
+        assert "a query" in events[1].text and "a source" in events[2].text
+        assert events[3].text == "partial text"
+        assert events[4].input_tokens == 12 and events[4].output_tokens == 20
+        assert stream.closed
+
     asyncio.run(scenario())
 
 
