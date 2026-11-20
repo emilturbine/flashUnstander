@@ -21,6 +21,8 @@ from .storage import Store
 from .window_bridge import WindowBridge
 from .window_manager import WindowManager
 from .desktop import DesktopIntegration
+from .control_ball import ControlBall
+from .control_bridge import ControlBridge
 
 
 @lru_cache(maxsize=1024)
@@ -37,12 +39,13 @@ class Runtime(QObject):
         self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
         self.config_path = self.directory / "settings.json"
-        self.config = {"provider": "deepseek", "model": "deepseek-flash", "max_output_tokens": 2048, "hotkey": "Alt+Space"}
+        self.config = {"provider": "deepseek", "model": "deepseek-flash", "max_output_tokens": 2048}
         if self.config_path.exists():
             try:
                 self.config.update(json.loads(self.config_path.read_text(encoding="utf-8")))
             except (OSError, ValueError):
                 pass
+        self.config.pop("hotkey", None)
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
@@ -236,48 +239,13 @@ def main():
 
     manager = WindowManager(controller_factory)
     try:
-        manager.create_window()
-    except Exception:
-        try:
-            runtime.shutdown()
-        finally:
-            lock.unlock()
-        raise
-    try:
         desktop = DesktopIntegration(app)
-        desktop.showRequested.connect(manager.show_recent)
-        desktop.newWindowRequested.connect(manager.create_window)
-        desktop.quitRequested.connect(app.quit)
-        bindings = {"Alt+Space": 0x0001, "Ctrl+Alt+Space": 0x0003, "Ctrl+Shift+Space": 0x0006}
-
-        def change_hotkey(value):
-            if value not in bindings:
-                return
-            if value == runtime.config.get("hotkey") and desktop._registered:
-                return
-            if not desktop.register_hotkey(bindings[value], 0x20):
-                for _, _, bridge, _ in manager.windows:
-                    bridge.update_state(status="快捷键注册失败，请选择其他组合")
-                    bridge.set_hotkey(runtime.config["hotkey"])
-                return
-            runtime.config["hotkey"] = value
-            runtime.config_path.write_text(json.dumps(runtime.config, ensure_ascii=False, indent=2), encoding="utf-8")
-            for _, _, bridge, _ in manager.windows:
-                bridge.set_hotkey(value)
-
-        def connect_window(window):
-            bridge = next(item[2] for item in manager.windows if item[0] is window)
-            bridge.set_hotkey(runtime.config["hotkey"])
-            bridge.hotkeyRequested.connect(change_hotkey)
-
-        manager.windowCreated.connect(connect_window)
-        connect_window(manager.windows[0][0])
-        saved_hotkey = runtime.config.get("hotkey", "Alt+Space")
-        if saved_hotkey not in bindings:
-            saved_hotkey = "Alt+Space"
-            runtime.config["hotkey"] = saved_hotkey
-        if not desktop.register_hotkey(bindings[saved_hotkey], 0x20):
-            manager.windows[0][2].update_state(status="全局快捷键不可用，可通过托盘打开窗口")
+        controls = ControlBridge(manager, app.quit)
+        desktop.showRequested.connect(controls.openRecent)
+        desktop.newWindowRequested.connect(controls.openNew)
+        desktop.quitRequested.connect(controls.quit)
+        ball = ControlBall(app, controls, shortcut_available=desktop.register_hotkey())
+        ball.show()
         return app.exec()
     finally:
         try:

@@ -62,8 +62,8 @@ class DesktopIntegration(QObject):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.showRequested.emit()
 
-    def register_hotkey(self, modifiers=0x0001, key=0x20):
-        """Register a Win32 modifier mask and virtual key; default Alt+Space.
+    def register_hotkey(self, modifiers=0x0005, key=0x57):
+        """Register a Win32 modifier mask and virtual key; default Alt+Shift+W.
 
         Returns False when unavailable. The prior binding is restored if possible.
         """

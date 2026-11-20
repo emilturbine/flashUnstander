@@ -7,7 +7,6 @@ class WindowBridge(QObject):
     stopRequested = Signal()
     settingsRequested = Signal()
     settingsSaved = Signal(str, str, str)
-    hotkeyRequested = Signal(str)
     stateChanged = Signal()
 
     def __init__(self, parent=None):
@@ -18,7 +17,6 @@ class WindowBridge(QObject):
         self._busy = False
         self._provider = "deepseek"
         self._model = "deepseek-flash"
-        self._hotkey = "Alt+Space"
         self.send_handler = None
 
     @Property(str, notify=stateChanged)
@@ -33,18 +31,6 @@ class WindowBridge(QObject):
         self._provider = provider
         self._model = model
         self.stateChanged.emit()
-
-    @Property(str, notify=stateChanged)
-    def hotkey(self):
-        return self._hotkey
-
-    def set_hotkey(self, value):
-        self._hotkey = value
-        self.stateChanged.emit()
-
-    @Slot(str)
-    def changeHotkey(self, value):
-        self.hotkeyRequested.emit(value)
 
     @Property(str, notify=stateChanged)
     def answer(self):
