@@ -16,7 +16,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Files]
-Source: "..\dist\flashUnstander\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\flashUnstander.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\flashUnstander"; Filename: "{app}\flashUnstander.exe"; WorkingDir: "{app}"

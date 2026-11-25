@@ -23,7 +23,7 @@ try {
         $pythonBase
         (Join-Path $pythonBase 'Library\bin')
     ) -join ';'
-    & $projectPython -m PyInstaller --clean --noconfirm --distpath dist --workpath build packaging/flashUnstander.spec
+    & $projectPython -m PyInstaller --clean --noconfirm --distpath . --workpath build packaging/flashUnstander.spec
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
     if ($InnoCompiler) {

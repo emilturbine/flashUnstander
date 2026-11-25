@@ -43,11 +43,26 @@ class Store:
     def close(self):
         self.connection.close()
 
+    def nonempty_conversations(self) -> list[str]:
+        rows = self.connection.execute(
+            "SELECT id FROM conversations WHERE EXISTS ("
+            "SELECT 1 FROM messages WHERE conversation_id=conversations.id "
+            "AND (length(trim(content)) > 0 OR length(image_url) > 0)) "
+            "ORDER BY rowid"
+        )
+        return [row[0] for row in rows]
+
     def recent_conversation(self) -> str | None:
         row = self.connection.execute(
             "SELECT id FROM conversations ORDER BY rowid DESC LIMIT 1"
         ).fetchone()
         return row[0] if row else None
+
+    def delete_conversation(self, conversation_id: str):
+        with self.connection:
+            for table in ("runs", "messages", "conversations"):
+                column = "id" if table == "conversations" else "conversation_id"
+                self.connection.execute(f"DELETE FROM {table} WHERE {column}=?", (conversation_id,))
 
     def create_conversation(self, title: str = "新会话") -> str:
         identifier = uuid4().hex
@@ -119,11 +134,11 @@ class Store:
                 "UPDATE runs SET status='interrupted' WHERE status IN ('queued','streaming')"
             )
 
-    def messages(self, conversation_id: str, limit: int = 50, before: int | None = None) -> list[dict]:
-        if limit < 1:
+    def messages(self, conversation_id: str, limit: int | None = 50, before: int | None = None) -> list[dict]:
+        if limit is not None and limit < 1:
             raise ValueError("limit must be positive")
         rows = self.connection.execute(
             "SELECT * FROM messages WHERE conversation_id=? AND (? IS NULL OR sequence < ?) "
-            "ORDER BY sequence DESC LIMIT ?", (conversation_id, before, before, limit)
+            "ORDER BY sequence DESC LIMIT ?", (conversation_id, before, before, -1 if limit is None else limit)
         ).fetchall()
         return [dict(row) for row in reversed(rows)]

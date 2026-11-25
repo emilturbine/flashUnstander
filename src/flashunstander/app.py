@@ -117,16 +117,15 @@ def message_row(role, text, *, status="complete", image=False):
 class Controller(QObject):
     event = Signal(object)
 
-    def __init__(self, app, bridge, runtime, restore=False):
+    def __init__(self, app, bridge, runtime, conversation_id=None):
         super().__init__()
         self.app = app
         self.bridge = bridge
         self.runtime = runtime
         self.directory = runtime.directory
-        self.restore = restore
         self.config = runtime.config
         self.loop = runtime.loop
-        self.conversation_id = None
+        self.conversation_id = conversation_id
         self.answer = ""
         self.messages = []
         self.pending_metrics = ""
@@ -152,8 +151,8 @@ class Controller(QObject):
             await asyncio.wrap_future(self.runtime.ready)
             self.service = self.runtime.service
             store = self.runtime.store
-            self.conversation_id = (store.recent_conversation() if self.restore else None) or store.create_conversation()
-            messages = store.messages(self.conversation_id)
+            self.conversation_id = self.conversation_id or store.create_conversation()
+            messages = store.messages(self.conversation_id, limit=None)
             context = select_context(messages, "", "", count_tokens,
                                      budget=self.config["context_tokens"],
                                      max_turns=self.config["context_turns"])
@@ -163,6 +162,12 @@ class Controller(QObject):
         except Exception as exc:
             self.event.emit(("error", str(exc)))
             raise
+
+    def delete_conversation(self):
+        async def delete():
+            self.runtime.store.delete_conversation(self.conversation_id)
+
+        asyncio.run_coroutine_threadsafe(delete(), self.loop).result()
 
     def settings(self, provider, model, key):
         try:
@@ -311,13 +316,12 @@ def main(*, launcher_class=ControlBall, qml_path=None, data_name="flashUnstander
     except Exception:
         lock.unlock()
         raise
-    first = True
+    async def load_history_ids():
+        await asyncio.wrap_future(runtime.ready)
+        return runtime.store.nonempty_conversations()
 
-    def controller_factory(bridge):
-        nonlocal first
-        controller = Controller(app, bridge, runtime, restore=first)
-        first = False
-        return controller
+    def controller_factory(bridge, conversation_id=None):
+        return Controller(app, bridge, runtime, conversation_id)
 
     manager = WindowManager(controller_factory, qml_path=qml_path)
     try:
@@ -327,6 +331,9 @@ def main(*, launcher_class=ControlBall, qml_path=None, data_name="flashUnstander
         desktop.showRequested.connect(controls.showAll)
         desktop.quitRequested.connect(controls.quit)
         ball = launcher_class(app, controls, shortcut_available=desktop.register_hotkey())
+        history_ids = asyncio.run_coroutine_threadsafe(load_history_ids(), runtime.loop).result()
+        for conversation_id in history_ids:
+            manager.create_window(conversation_id=conversation_id, visible=False)
         ball.show()
         return app.exec()
     finally:

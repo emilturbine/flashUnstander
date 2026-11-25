@@ -5,6 +5,7 @@ observer. Only the static surface maps and view-space geometry are cached.
 """
 from functools import lru_cache
 from math import ceil, cos, pi, sin
+from random import Random
 
 import numpy as np
 from PySide6.QtGui import QImage
@@ -75,12 +76,12 @@ def _albedo(kind, seed):
 
 
 _RING_NORMAL = (-.26, -.91, .322)
-_RING_EXTENT = 1.83
+RING_EXTENT = 1.83
 
 
 @lru_cache(maxsize=32)
-def _geometry(size, kind):
-    extent = _RING_EXTENT if kind == 3 else 1.
+def _geometry(size, kind, ringed):
+    extent = RING_EXTENT if ringed else 1.
     axis = ((np.arange(size, dtype=np.float32) + .5) / size * 2 - 1) * extent
     x, y = np.meshgrid(axis, axis)
     radial = np.hypot(x, y)
@@ -101,14 +102,14 @@ def _geometry(size, kind):
     return x, y, z, coverage, u, iy, np.minimum(iy+1, height-1), (row-iy).astype(np.float32)[..., None]
 
 
-def _rings(rgb, alpha, x, y, z, light, size):
+def _rings(rgb, alpha, x, y, z, light, size, opacity, color):
     nx, ny, nz = _RING_NORMAL
     ring_z = -(nx*x + ny*y) / nz
     distance = np.sqrt(x*x + y*y + ring_z*ring_z)
-    edge = size / (2 * _RING_EXTENT)
+    edge = size / (2 * RING_EXTENT)
     density = (.69 + .10*np.cos(71*distance) + .07*np.sin(129*distance))
     density *= 1 - .90 * np.exp(-((distance - 1.54) / .025)**2)
-    density *= _smooth((distance - 1.20)*edge) * _smooth((1.80 - distance)*edge)
+    density *= opacity * _smooth((distance - 1.20)*edge) * _smooth((1.80 - distance)*edge)
     # A ray from the ring toward the star intersects the planet in its shadow.
     along = -(x*light[0] + y*light[1] + ring_z*light[2])
     shadow = (along > 0) * _smooth((1 - distance**2 + along**2)*10)
@@ -119,9 +120,9 @@ def _rings(rgb, alpha, x, y, z, light, size):
         crossing = np.sqrt((x+travel*light[0])**2 + (y+travel*light[1])**2
                            + (z+travel*light[2])**2)
         in_band = _smooth((crossing-1.2)*12) * _smooth((1.8-crossing)*12)
-        rgb = rgb * (1 - .38*in_band*(travel > 0))[..., None]
+        rgb = rgb * (1 - .38*opacity*in_band*(travel > 0))[..., None]
     ring_light = (.54 + .40*abs(nx*light[0] + ny*light[1] + nz*light[2])) * (1 - .72*shadow)
-    ring_rgb = np.array((220, 202, 165), dtype=np.float32) * ring_light[..., None]
+    ring_rgb = np.array(color, dtype=np.float32) * ring_light[..., None]
     visible = density * np.where(ring_z > z, 1, 1-alpha)
     # Work premultiplied here so the ring's fractional opacity survives at the limb.
     underlying = alpha * (1 - density * (ring_z > z))
@@ -130,12 +131,32 @@ def _rings(rgb, alpha, x, y, z, light, size):
     return combined / np.maximum(out_alpha[..., None], .0001), out_alpha
 
 
-def sphere(kind, radius, pixel_ratio, light, spin, seed=0):
+@lru_cache(maxsize=128)
+def _ring_schedule(seed, cycle):
+    rng = Random((seed + 1) * 8191 + cycle * 131071)
+    start = rng.uniform(0, 24)
+    duration = rng.uniform(11, 20)
+    warm = rng.random()
+    pale = (221, 220, 214)
+    brown = (166, 126, 89)
+    color = tuple(round(a + (b-a)*warm) for a, b in zip(pale, brown))
+    return start, duration, color
+
+
+def ring_state(seed, seconds):
+    cycle, phase = divmod(seconds + seed*9.1, 48)
+    start, duration, color = _ring_schedule(seed, int(cycle))
+    fade = max(0., min(1., (phase-start)/1.4, (start+duration-phase)/1.4))
+    return fade*fade*(3-2*fade), color
+
+
+def sphere(kind, radius, pixel_ratio, light, spin, seed=0, *, brightness=1., shadow_light=.36, ring=None):
     """Render a rotating textured sphere, including analytic limb coverage."""
-    extent = _RING_EXTENT if kind == 3 else 1.
+    ringed = ring is not None and ring[0] > 0 and kind != 0
+    extent = RING_EXTENT if ringed else 1.
     # Bucket resolutions to reuse geometry throughout the expansion animation.
-    size = min(256, max(32, 16 * ceil(2 * radius * extent * pixel_ratio / 16)))
-    x, y, z, alpha, u, iy, jy, fy = _geometry(size, kind)
+    size = min(320, max(32, 16 * ceil(2 * radius * extent * pixel_ratio * 1.4 / 16)))
+    x, y, z, alpha, u, iy, jy, fy = _geometry(size, kind, ringed)
     texture = _albedo(kind, seed)
     column = ((u - spin / (2*pi)) % 1) * texture.shape[1]
     ix = column.astype(np.int32) % texture.shape[1]
@@ -145,19 +166,22 @@ def sphere(kind, radius, pixel_ratio, light, spin, seed=0):
     right = texture[iy, jx] * (1-fy) + texture[jy, jx] * fy
     rgb = left + (right - left)*fx
     if kind == 0:
-        rgb *= (.69 + .31*z**.57)[..., None]
+        rgb *= (.745 + .28*z**.57)[..., None]
     else:
         lx, ly, lz = light
         incidence = x*lx + y*ly + z*lz
-        diffuse = np.clip((incidence+.045)/1.045, 0, 1)**.68
-        rgb *= (.32 + .71*diffuse)[..., None]
+        # Keep the terminator narrow, with a resolution-aware transition at its edge.
+        feather = max(.015, 1.5 * extent / size)
+        terminator = _smooth((incidence + feather) / (2 * feather))
+        diffuse = .14 * terminator + .86 * np.maximum(incidence, 0)**.72
+        rgb *= (shadow_light + (1.055 - shadow_light)*diffuse)[..., None]
         rim = (1-z)**2.5 * (.12 + .88*_smooth((incidence+.30)*2))
         tint = (64, 137, 203) if kind in (1, 4) else (151, 93, 50)
         rgb += rim[..., None] * np.asarray(tint, dtype=np.float32)
-        if kind == 3:
-            rgb, alpha = _rings(rgb, alpha, x, y, z, light, size)
+        if ringed:
+            rgb, alpha = _rings(rgb, alpha, x, y, z, light, size, *ring)
     pixels = np.empty((size, size, 4), dtype=np.uint8)
-    pixels[..., :3] = np.clip(rgb, 0, 255)
+    pixels[..., :3] = np.clip(rgb * brightness, 0, 255)
     pixels[..., 3] = alpha * 255
     image = QImage(pixels.data, size, size, pixels.strides[0], QImage.Format.Format_RGBA8888)
-    return image.copy(), radius * extent
+    return image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied), radius * extent

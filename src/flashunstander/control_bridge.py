@@ -32,6 +32,14 @@ class ControlBridge(QObject):
             window.raise_()
             window.requestActivate()
 
+    def canDeleteWindow(self, index):
+        return 0 <= index < self.windowCount and not self._manager.windows[index][2].busy
+
+    def deleteWindow(self, index):
+        if self.canDeleteWindow(index):
+            return self._manager.delete_window(index)
+        return False
+
     @Slot()
     def openRecent(self):
         self._manager.show_recent()

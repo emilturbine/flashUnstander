@@ -81,8 +81,8 @@ def orbital_speed(axis, mass_ratio):
     return .31 * sqrt(1 + mass_ratio) * (70 / axis)**1.5
 
 
-def project(x, y, z):
-    scale = 620 / (620 - z)
+def project(x, y, z, camera=620.):
+    scale = camera / (camera - z)
     return x*scale, y*scale, scale
 
 

@@ -20,15 +20,6 @@ analysis = Analysis(
     hiddenimports=["PySide6.QtQuick", "keyring.backends.Windows"],
 )
 archive = PYZ(analysis.pure)
-program = EXE(
-    archive,
-    analysis.scripts,
-    [],
-    exclude_binaries=True,
-    name="flashUnstander",
-    console=False,
-    upx=False,
-)
 # Python's base environment and Qt can ship different MSVC runtime builds.
 # Windows reuses already-loaded DLLs by basename, so use Qt's copy at the
 # bundle root as well as in PySide6 before a Python extension loads it.
@@ -48,10 +39,12 @@ runtime.extend(
     for name, dll in qt_runtime.items()
     if name not in root_destinations
 )
-distribution = COLLECT(
-    program,
+program = EXE(
+    archive,
+    analysis.scripts,
     runtime,
     analysis.datas,
     name="flashUnstander",
+    console=False,
     upx=False,
 )

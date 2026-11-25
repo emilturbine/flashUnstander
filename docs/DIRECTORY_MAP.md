@@ -25,7 +25,7 @@
 - `tests/exit_smoke.py`：验证正常退出释放实例锁和 SQLite 文件句柄。
 - `examples/README.md`：自定义窗口接口示例说明。
 - `docs/PROGRESS.md`：阶段进度、设计决定和测试授权记录。
-- `scripts/build-windows.ps1`：目录版和安装包的构建入口。
+- `scripts/build-windows.ps1`：根目录单文件 EXE 和可选安装包的构建入口。
 - `packaging/`：冻结程序入口、PyInstaller 配置、Inno Setup 脚本和 Windows 依赖清单。
 - `.venv/`：本地虚拟环境，不提交。
 - `.scratch/`、`build/`、`dist/`：临时文件及构建产物，不提交。

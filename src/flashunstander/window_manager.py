@@ -19,9 +19,10 @@ class WindowManager(QObject):
         self.windows = []
         self.last_window = None
 
-    def create_window(self, source=None):
+    def create_window(self, source=None, *, conversation_id=None, visible=True):
         bridge = WindowBridge()
-        controller = self.controller_factory(bridge)
+        controller = (self.controller_factory(bridge) if conversation_id is None
+                      else self.controller_factory(bridge, conversation_id))
         engine = QQmlApplicationEngine()
         engine.rootContext().setContextProperty("bridge", bridge)
         engine.load(QUrl.fromLocalFile(str(self.qml_path.resolve())))
@@ -35,9 +36,27 @@ class WindowManager(QObject):
         self.windows.append((window, engine, bridge, controller))
         self.last_window = window
         self.windowCreated.emit(window)
-        window.show()
-        window.requestActivate()
+        if visible:
+            window.show()
+            window.requestActivate()
+        else:
+            self.windowsChanged.emit()
         return window
+
+    def delete_window(self, index):
+        window, engine, bridge, controller = self.windows[index]
+        if bridge.busy:
+            return False
+        controller.delete_conversation()
+        self.windows.pop(index)
+        if self.last_window is window:
+            self.last_window = self.windows[-1][0] if self.windows else None
+        window.hide()
+        engine.deleteLater()
+        controller.deleteLater()
+        bridge.deleteLater()
+        self.windowsChanged.emit()
+        return True
 
     def _place(self, window, source):
         screen = source.screen() if source else QGuiApplication.primaryScreen()
