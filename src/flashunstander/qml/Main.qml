@@ -5,17 +5,17 @@ import QtQuick.Dialogs
 
 ApplicationWindow {
     id: window
-    width: 360
-    height: 320
+    width: 420
+    height: 500
     minimumWidth: 320
     minimumHeight: 240
     title: "flashUnstander"
     flags: Qt.Window | Qt.FramelessWindowHint
     property bool lightTheme: false
     property color foreground: lightTheme ? "#182334" : "#edf1f8"
-    property color surface: lightTheme ? "#ffffff" : "#222937"
+    property color surface: lightTheme ? "#ffffff" : "#171b24"
     property color muted: lightTheme ? "#516078" : "#aebbd0"
-    color: lightTheme ? "#e9edf4" : "#171b24"
+    color: lightTheme ? "#e9edf4" : "#0d0f14"
     property string imagePath: ""
     signal newWindowRequested()
     onClosing: function(close) { close.accepted = false; window.hide() }
@@ -135,7 +135,7 @@ ApplicationWindow {
                             anchors.left: message.fromUser ? undefined : parent.left
                             width: parent.width * 0.85
                             height: bubbleContent.implicitHeight + 14
-                            color: message.fromUser ? (window.lightTheme ? "#dce9ff" : "#29466c") : window.surface
+                            color: message.fromUser ? (window.lightTheme ? "#dce9ff" : "#333029") : window.surface
                             radius: 8
 
                             ColumnLayout {

@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cosmic Agent Widget — 270×270 三维星系悬浮窗与高定扁平化 UI</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+    :root {
+      --bg-desktop: #06070a;
+      --bg-panel: #0d0f14;
+      --bg-surface: #13161e;
+      --border-hairline: rgba(255, 255, 255, 0.085);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text-primary: #eef0f6;
+      --text-secondary: #98a0b3;
+      --text-muted: #5f6678;
+      --accent-sun: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background-color: var(--bg-desktop);
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      overflow-x: hidden;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Subtle precision architectural grid */
+    .desktop-stage {
+      background-image:
+        radial-gradient(circle at 46% 48%, rgba(26, 33, 52, 0.24) 0%, rgba(6, 7, 10, 0.98) 68%),
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 100% 100%, 40px 40px, 40px 40px;
+    }
+
+    /* Exact 270x270 Floating Widget Container */
+    .widget-270 {
+      width: 270px;
+      height: 270px;
+      position: relative;
+      border-radius: 16px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .widget-270.show-bounds {
+      outline: 1px solid rgba(245, 158, 11, 0.35);
+      outline-offset: 3px;
+    }
+
+    /* High-End Flat Hairline Window */
+    .flat-window {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-hairline);
+      border-radius: 8px;
+    }
+
+    .flat-btn {
+      background: transparent;
+      border: 1px solid var(--border-hairline);
+      color: var(--text-secondary);
+      transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+    }
+
+    .flat-btn:hover {
+      border-color: var(--border-strong);
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .flat-scroll::-webkit-scrollbar {
+      width: 3px;
+    }
+    .flat-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .flat-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 2px;
+    }
+
+    .mono {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Minimal hairline range slider */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.12);
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f59e0b;
+      border: 1.5px solid #0d0f14;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body class="desktop-stage flex flex-col min-h-screen">
+
+  <!-- Minimal Top Precision Header -->
+  <header class="w-full border-b border-white/[0.07] bg-[#08090d]/90 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 z-20">
+    <div class="flex items-center gap-3">
+      <div class="w-2 h-2 rounded-full bg-amber-400"></div>
+      <div class="flex flex-col">
+        <div class="flex items-center gap-2.5">
+          <h1 class="text-[13px] font-medium tracking-wide text-[#eef0f6]">COSMIC AGENT WIDGET</h1>
+          <span class="text-[10px] mono uppercase tracking-widest text-[#5f6678] border-l border-white/10 pl-2.5">3D PBR + FLAT UI</span>
+        </div>
+        <p class="text-[11px] font-light text-[#98a0b3] mt-0.5">
+          <span class="mono text-amber-400/90">270×270 PX</span> · 黄道面侧视角三维物理渲染与极简线条扁平化交互
+        </p>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 text-[11px]">
+      <button id="btnToggleBounds" class="flat-btn px-2.5 py-1.5 rounded cursor-pointer mono tracking-tight">
+        隐藏 270×270 边界
+      </button>
+      <button id="btnForceHover" class="flat-btn px-2.5 py-1.5 rounded cursor-pointer mono tracking-tight">
+        锁定展开态
+      </button>
+      <button id="btnAddPlanet" class="px-2.5 py-1.5 rounded border border-amber-500/40 bg-amber-500/[0.08] hover:bg-amber-500/[0.15] text-amber-300 font-normal tracking-wide transition-colors cursor-pointer mono">
+        + 新建对话行星
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Stage -->
+  <main class="flex-1 flex flex-col lg:flex-row items-center justify-center gap-8 p-4 sm:p-8 relative">
+
+    <!-- Left: 270x270 3D Floating Widget -->
+    <div class="flex flex-col items-center gap-4">
+      <div class="w-[270px] flex items-center justify-between text-[10px] mono tracking-wider text-[#98a0b3]">
+        <span id="stateBadge" class="inline-flex items-center gap-1.5">
+          <span id="stateDot" class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+          <span id="stateText">STANDBY · 待机恒星</span>
+        </span>
+        <span class="text-[#5f6678]">270 × 270</span>
+      </div>
+
+      <!-- EXACT 270x270 WIDGET -->
+      <div id="widgetContainer" class="widget-270 show-bounds">
+        <canvas id="galaxyCanvas" width="270" height="270" class="w-[270px] h-[270px] block rounded-[16px] cursor-pointer"></canvas>
+        <!-- Crisp 2D Hairline Overlay for Reticle & Subtle Corner Ticks -->
+        <canvas id="overlayCanvas" width="270" height="270" class="pointer-events-none absolute inset-0 w-[270px] h-[270px] rounded-[16px]"></canvas>
+
+        <!-- Minimal Flat Dark HUD Pill -->
+        <div id="hudPill" class="pointer-events-none absolute left-2.5 right-2.5 bottom-2.5 px-2.5 py-1.5 rounded bg-[#0d0f14]/90 border border-white/[0.1] flex items-center justify-between gap-2 opacity-0 translate-y-1 transition-all duration-200">
+          <div class="flex items-center gap-2 min-w-0">
+            <span id="hudDot" class="w-1.5 h-1.5 rounded-full shrink-0 bg-amber-400"></span>
+            <span id="hudTitle" class="text-[11px] font-normal text-[#eef0f6] truncate">核心恒星 · 设置</span>
+          </div>
+          <span id="hudMeta" class="text-[10px] mono text-[#98a0b3] shrink-0">滚轮切换</span>
+        </div>
+      </div>
+
+      <div class="max-w-[270px] text-center text-[11px] font-light text-[#5f6678] leading-relaxed">
+        移入展开三维星系 · <span class="text-[#98a0b3]">滚轮</span> 切换焦点 · <span class="text-[#98a0b3]">点击恒星/行星</span> 打开窗口
+      </div>
+
+      <!-- Context Length Simulator -->
+      <div class="w-[270px] flat-window p-3 flex flex-col gap-2.5">
+        <div class="flex items-center justify-between text-[10px] mono tracking-wider uppercase">
+          <span class="text-[#98a0b3]">CONTEXT MASS</span>
+          <span id="simTokenReadout" class="text-amber-400">42,000 TOKENS</span>
+        </div>
+        <input id="simTokenSlider" type="range" min="1000" max="128000" step="1000" value="42000" class="w-full" />
+        <div class="flex justify-between text-[9px] text-[#5f6678] mono">
+          <span>1K · 微行星</span>
+          <span>64K</span>
+          <span>128K · 巨行星</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: High-End Flat Dark Window (Chat OR Core Settings) -->
+    <section id="panelHost" class="w-full max-w-[420px] h-[500px] flat-window flex flex-col overflow-hidden">
+
+      <!-- CHAT WINDOW VIEW -->
+      <div id="chatView" class="flex flex-col h-full">
+        <!-- Hairline Header -->
+        <div class="px-4 py-3 border-b border-white/[0.07] bg-[#0f1117] flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <canvas id="chatPlanetBadge" width="24" height="24" class="w-6 h-6 rounded-full shrink-0 border border-white/10"></canvas>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h2 id="chatTitle" class="text-[13px] font-medium text-[#eef0f6] truncate tracking-tight">架构设计与代码重构</h2>
+                <span id="chatTypeTag" class="text-[9px] px-1.5 py-0.5 rounded-sm border border-white/[0.09] text-[#98a0b3] mono tracking-wider uppercase shrink-0">类地海洋</span>
+              </div>
+              <div class="flex items-center gap-2.5 mt-1">
+                <div class="w-24 h-[2px] bg-white/[0.08] overflow-hidden">
+                  <div id="chatContextBar" class="h-full bg-amber-400 transition-all duration-300" style="width: 33%"></div>
+                </div>
+                <span id="chatTokensText" class="text-[10px] mono text-[#98a0b3]">42K / 128K</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1">
+            <button id="btnOpenCoreFromChat" title="核心设置" class="p-1.5 rounded border border-transparent hover:border-white/[0.1] text-[#98a0b3] hover:text-[#eef0f6] transition-colors cursor-pointer">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button id="btnDeletePlanet" title="归档此对话行星" class="p-1.5 rounded border border-transparent hover:border-red-500/30 text-[#98a0b3] hover:text-red-400 transition-colors cursor-pointer">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="chatMessages" class="flex-1 overflow-y-auto flat-scroll p-4 space-y-3 text-[12px] font-light leading-relaxed"></div>
+
+        <!-- Hairline Input Bar -->
+        <form id="chatForm" class="p-3 border-t border-white/[0.07] bg-[#0f1117] flex items-center gap-2">
+          <input id="chatInput" type="text" placeholder="输入指令以扩展上下文与行星质量..." class="flex-1 bg-transparent border border-white/[0.09] focus:border-amber-500/50 rounded px-3 py-2 text-[12px] font-light text-[#eef0f6] placeholder-[#5f6678] outline-none transition-colors" />
+          <button type="submit" class="px-3.5 py-2 rounded border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-[11px] mono tracking-wider uppercase transition-colors cursor-pointer shrink-0">
+            发送
+          </button>
+        </form>
+      </div>
+
+      <!-- CORE SETTINGS VIEW -->
+      <div id="coreView" class="hidden flex-col h-full">
+        <div class="px-4 py-3 border-b border-white/[0.07] bg-[#0f1117] flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <div class="w-4 h-4 rounded-full border border-amber-400/70 bg-amber-500/20 flex items-center justify-center">
+              <div class="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
+            </div>
+            <div>
+              <h2 class="text-[12px] font-medium text-[#eef0f6] tracking-wide">SOLAR CORE · 核心中枢</h2>
+              <p class="text-[10px] text-[#5f6678] mono tracking-wider">THREE.JS PBR ENGINE</p>
+            </div>
+          </div>
+          <button id="btnBackToChat" class="flat-btn text-[10px] mono tracking-wider uppercase px-2.5 py-1 rounded cursor-pointer">
+            返回对话
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto flat-scroll p-4 space-y-4 text-[12px]">
+          <div class="space-y-1.5">
+            <label class="text-[10px] mono uppercase tracking-wider text-[#98a0b3]">INFERENCE CORE // 推理核心</label>
+            <select id="settingModel" class="w-full bg-[#090b0f] border border-white/[0.09] rounded px-3 py-2 text-[12px] font-light text-[#eef0f6] outline-none">
+              <option value="Gemini 2.5 Pro">Gemini 2.5 Pro · 深度推理</option>
+              <option value="Gemini 2.5 Flash">Gemini 2.5 Flash · 极速响应</option>
+              <option value="Local GGUF">Local Agent Node · 本地节点</option>
+            </select>
+          </div>
+
+          <div class="p-3.5 rounded border border-white/[0.07] bg-[#090b0f]/60 space-y-3.5">
+            <div class="text-[10px] mono uppercase tracking-wider text-[#98a0b3]">PHYSICS & SHADER // 物理与渲染</div>
+            <div class="space-y-1.5">
+              <div class="flex justify-between text-[11px]">
+                <span class="text-[#98a0b3] font-light">轨道角速度倍率</span>
+                <span id="orbitSpeedVal" class="mono text-amber-400">1.0×</span>
+              </div>
+              <input id="settingOrbitSpeed" type="range" min="0" max="2.5" step="0.1" value="1.0" class="w-full" />
+            </div>
+            <div class="space-y-1.5">
+              <div class="flex justify-between text-[11px]">
+                <span class="text-[#98a0b3] font-light">恒星日冕与日珥强度</span>
+                <span id="sunGlowVal" class="mono text-amber-400">100%</span>
+              </div>
+              <input id="settingSunGlow" type="range" min="0.4" max="1.6" step="0.1" value="1.0" class="w-full" />
+            </div>
+            <label class="flex items-center justify-between pt-1 cursor-pointer">
+              <span class="text-[11px] font-light text-[#98a0b3]">鼠标引力微扰</span>
+              <input id="settingGravity" type="checkbox" checked class="accent-amber-500 w-3.5 h-3.5 cursor-pointer" />
+            </label>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] mono uppercase tracking-wider text-[#98a0b3]">ORBITING NODES (<span id="planetCountText">5</span>)</span>
+              <button id="btnAddPlanetFromCore" class="text-[10px] mono tracking-wider text-amber-400 hover:text-amber-300 cursor-pointer">+ 新增轨道</button>
+            </div>
+            <div id="corePlanetList" class="space-y-1.5"></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <script>
+    // =========================================================================
+    // 1. 3D NOISE & SEAMLESS EQUIRECTANGULAR PROCEDURAL TEXTURE GENERATOR
+    // =========================================================================
+    function mulberry32(seed) {
+      let a = seed >>> 0;
+      return function() {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+
+    function hash3(x, y, z, seed) {
+      let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(z, 2147483647) + Math.imul(seed, 1597334677);
+      h = (h ^ (h >>> 13)) * 1274126177;
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+    }
+
+    function smoothstep(t) { return t * t * (3 - 2 * t); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    function noise3D(x, y, z, seed) {
+      const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+      const xf = smoothstep(x - xi), yf = smoothstep(y - yi), zf = smoothstep(z - zi);
+      const n000 = hash3(xi, yi, zi, seed);
+      const n100 = hash3(xi + 1, yi, zi, seed);
+      const n010 = hash3(xi, yi + 1, zi, seed);
+      const n110 = hash3(xi + 1, yi + 1, zi, seed);
+      const n001 = hash3(xi, yi, zi + 1, seed);
+      const n101 = hash3(xi + 1, yi, zi + 1, seed);
+      const n011 = hash3(xi, yi + 1, zi + 1, seed);
+      const n111 = hash3(xi + 1, yi + 1, zi + 1, seed);
+      const nx00 = lerp(n000, n100, xf), nx10 = lerp(n010, n110, xf);
+      const nx01 = lerp(n001, n101, xf), nx11 = lerp(n011, n111, xf);
+      return lerp(lerp(nx00, nx10, yf), lerp(nx01, nx11, yf), zf);
+    }
+
+    function fbm3D(x, y, z, seed, octaves = 5) {
+      let val = 0, amp = 0.5, freq = 1;
+      for (let i = 0; i < octaves; i++) {
+        val += amp * noise3D(x * freq, y * freq, z * freq, seed + i * 31);
+        freq *= 2.04;
+        amp *= 0.5;
+      }
+      return val;
+    }
+
+    const ARCHETYPES = [
+      { id: 'terrestrial', label: '类地海洋', rim: 0x5ca8ff, dot: '#5aa9ff', hasRing: false, rough: 0.65 },
+      { id: 'gas_giant',   label: '气态巨星', rim: 0xf6b978, dot: '#f5b062', hasRing: false, rough: 0.85 },
+      { id: 'ice_giant',   label: '冰巨星',   rim: 0x67e8f9, dot: '#67e8f9', hasRing: false, rough: 0.55 },
+      { id: 'volcanic',    label: '熔岩行星', rim: 0xff6b4a, dot: '#ff6b4a', hasRing: false, rough: 0.88 },
+      { id: 'desert',      label: '赤漠行星', rim: 0xe89566, dot: '#e89566', hasRing: false, rough: 0.90 },
+      { id: 'ringed',      label: '环带行星', rim: 0xc4b5fd, dot: '#c4b5fd', hasRing: true,  rough: 0.78 }
+    ];
+
+    // Generate seamless equirectangular Albedo + Bump + Emissive + Cloud + Badge
+    function generatePlanetMaps(seed, archetype) {
+      const w = 256, h = 128;
+      const albedoCanvas = document.createElement('canvas');
+      albedoCanvas.width = w; albedoCanvas.height = h;
+      const actx = albedoCanvas.getContext('2d');
+      const aImg = actx.createImageData(w, h);
+
+      const bumpCanvas = document.createElement('canvas');
+      bumpCanvas.width = w; bumpCanvas.height = h;
+      const bctx = bumpCanvas.getContext('2d');
+      const bImg = bctx.createImageData(w, h);
+
+      const emisCanvas = document.createElement('canvas');
+      emisCanvas.width = w; emisCanvas.height = h;
+      const ectx = emisCanvas.getContext('2d');
+      const eImg = ectx.createImageData(w, h);
+
+      const rand = mulberry32(seed);
+      const hueShift = (rand() - 0.5) * 24;
+      const stormLat = (rand() - 0.5) * 0.6;
+      const stormLon = rand() * Math.PI * 2;
+
+      for (let py = 0; py < h; py++) {
+        const theta = (py / (h - 1)) * Math.PI; // 0..PI
+        const sinT = Math.sin(theta);
+        const cosT = Math.cos(theta);
+        for (let px = 0; px < w; px++) {
+          const phi = (px / w) * Math.PI * 2;
+          const sx = sinT * Math.cos(phi);
+          const sy = cosT;
+          const sz = sinT * Math.sin(phi);
+          const idx = (py * w + px) * 4;
+
+          let r = 128, g = 128, b = 128;
+          let bump = 128;
+          let er = 0, eg = 0, eb = 0;
+
+          if (archetype.id === 'terrestrial') {
+            const warp = fbm3D(sx * 1.8, sy * 1.8, sz * 1.8, seed + 7, 3) * 0.5;
+            const n = fbm3D(sx * 2.5 + warp, sy * 2.5 + warp, sz * 2.5, seed, 5);
+            const polar = Math.abs(sy) > (0.83 - n * 0.12);
+            if (polar) {
+              r = 232; g = 240; b = 248;
+              bump = 175;
+            } else if (n < 0.49) {
+              const depth = n / 0.49;
+              r = 10 + depth * 22;
+              g = 42 + depth * 72;
+              b = 102 + depth * 95;
+              bump = 65;
+            } else {
+              const elev = (n - 0.49) / 0.51;
+              const arid = fbm3D(sx * 4.2, sy * 4.2, sz * 4.2, seed + 55, 3);
+              if (elev > 0.62) {
+                r = 158 + elev * 70; g = 152 + elev * 72; b = 148 + elev * 78; // alpine peaks
+              } else if (arid > 0.56 && Math.abs(sy) < 0.55) {
+                r = 176 + hueShift * 0.4; g = 148; b = 96; // desert belt
+              } else {
+                r = 44 + elev * 68 + hueShift * 0.3;
+                g = 98 + elev * 65;
+                b = 46 + elev * 38;
+              }
+              bump = 132 + elev * 120;
+            }
+          } else if (archetype.id === 'gas_giant') {
+            const turb = fbm3D(sx * 2.4, sy * 5.5, sz * 2.4, seed, 5);
+            const band = Math.sin((sy * 9.0 + turb * 2.8) * Math.PI) * 0.5 + 0.5;
+            const fine = Math.sin((sy * 24.0 + turb * 5.0) * Math.PI) * 0.5 + 0.5;
+            r = lerp(142, 232, band) * 0.85 + fine * 28 + hueShift * 0.5;
+            g = lerp(92, 184, band) * 0.85 + fine * 22 + hueShift * 0.25;
+            b = lerp(62, 134, band) * 0.85 + fine * 18;
+            // Anticyclonic storm vortex
+            const dPhi = Math.atan2(Math.sin(phi - stormLon), Math.cos(phi - stormLon));
+            const dLat = sy - stormLat;
+            const distStorm = Math.hypot(dPhi * 0.65, dLat * 1.4);
+            if (distStorm < 0.22) {
+              const sMix = smoothstep(1 - distStorm / 0.22);
+              r = lerp(r, 224, sMix);
+              g = lerp(g, 110, sMix);
+              b = lerp(b, 72, sMix);
+            }
+            bump = 120 + band * 25;
+          } else if (archetype.id === 'ice_giant') {
+            const turb = fbm3D(sx * 2.5, sy * 4.5, sz * 2.5, seed, 4);
+            const streak = Math.sin((sy * 6.5 + turb * 2.2) * Math.PI) * 0.5 + 0.5;
+            const wisp = fbm3D(sx * 6.0, sy * 12.0, sz * 6.0, seed + 41, 3);
+            r = lerp(42, 112, streak) + (wisp > 0.64 ? 65 : 0);
+            g = lerp(136, 212, streak) + (wisp > 0.64 ? 40 : 0);
+            b = lerp(196, 248, streak);
+            bump = 124 + streak * 16;
+          } else if (archetype.id === 'volcanic') {
+            const ridge = Math.abs(fbm3D(sx * 3.6, sy * 3.6, sz * 3.6, seed, 5) - 0.5) * 2.0;
+            if (ridge < 0.14) {
+              const heat = 1 - ridge / 0.14;
+              r = 255; g = 100 + heat * 125; b = 22 + heat * 35;
+              er = r; eg = g * 0.85; eb = b * 0.5;
+              bump = 70;
+            } else {
+              const rock = fbm3D(sx * 6.0, sy * 6.0, sz * 6.0, seed + 13, 4);
+              r = 26 + rock * 38; g = 24 + rock * 32; b = 28 + rock * 32;
+              bump = 110 + rock * 130;
+            }
+          } else if (archetype.id === 'desert') {
+            const canyon = fbm3D(sx * 3.2, sy * 3.2, sz * 3.2, seed, 5);
+            const dune = Math.sin((sx * 14 + canyon * 4) * Math.PI) * 0.5 + 0.5;
+            r = lerp(142, 224, canyon) + dune * 16 + hueShift * 0.3;
+            g = lerp(74, 146, canyon) + dune * 10;
+            b = lerp(46, 94, canyon) + dune * 6;
+            bump = 95 + canyon * 145;
+          } else {
+            // ringed rocky/icy world with craters
+            const n = fbm3D(sx * 3.4, sy * 3.8, sz * 3.4, seed, 5);
+            const crater = Math.abs(fbm3D(sx * 9.0, sy * 9.0, sz * 9.0, seed + 77, 3) - 0.5);
+            r = lerp(96, 184, n) + hueShift * 0.3;
+            g = lerp(92, 174, n);
+            b = lerp(128, 222, n);
+            bump = 100 + n * 100 - (crater < 0.08 ? 45 : 0);
+          }
+
+          aImg.data[idx] = Math.max(0, Math.min(255, r));
+          aImg.data[idx + 1] = Math.max(0, Math.min(255, g));
+          aImg.data[idx + 2] = Math.max(0, Math.min(255, b));
+          aImg.data[idx + 3] = 255;
+
+          const bv = Math.max(0, Math.min(255, bump));
+          bImg.data[idx] = bv; bImg.data[idx + 1] = bv; bImg.data[idx + 2] = bv; bImg.data[idx + 3] = 255;
+
+          eImg.data[idx] = er; eImg.data[idx + 1] = eg; eImg.data[idx + 2] = eb; eImg.data[idx + 3] = 255;
+        }
+      }
+      actx.putImageData(aImg, 0, 0);
+      bctx.putImageData(bImg, 0, 0);
+      ectx.putImageData(eImg, 0, 0);
+
+      // Cloud canvas for terrestrial worlds
+      let cloudTex = null;
+      if (archetype.id === 'terrestrial') {
+        const cc = document.createElement('canvas');
+        cc.width = w; cc.height = h;
+        const cctx = cc.getContext('2d');
+        const cImg = cctx.createImageData(w, h);
+        for (let py = 0; py < h; py++) {
+          const theta = (py / (h - 1)) * Math.PI;
+          const sinT = Math.sin(theta), cosT = Math.cos(theta);
+          for (let px = 0; px < w; px++) {
+            const phi = (px / w) * Math.PI * 2;
+            const c = fbm3D(sinT * Math.cos(phi) * 3.4, cosT * 3.4, sinT * Math.sin(phi) * 3.4, seed + 303, 4);
+            const idx = (py * w + px) * 4;
+            const alpha = c > 0.54 ? Math.min(230, (c - 0.54) * 780) : 0;
+            cImg.data[idx] = 248; cImg.data[idx + 1] = 251; cImg.data[idx + 2] = 255; cImg.data[idx + 3] = alpha;
+          }
+        }
+        cctx.putImageData(cImg, 0, 0);
+        cloudTex = new THREE.CanvasTexture(cc);
+      }
+
+      // Badge preview (24x24 circular crop)
+      const badgeCanvas = document.createElement('canvas');
+      badgeCanvas.width = 48; badgeCanvas.height = 48;
+      const bgCtx = badgeCanvas.getContext('2d');
+      bgCtx.beginPath();
+      bgCtx.arc(24, 24, 24, 0, Math.PI * 2);
+      bgCtx.clip();
+      bgCtx.drawImage(albedoCanvas, 48, 0, 128, 128, 0, 0, 48, 48);
+
+      return {
+        map: new THREE.CanvasTexture(albedoCanvas),
+        bumpMap: new THREE.CanvasTexture(bumpCanvas),
+        emissiveMap: archetype.id === 'volcanic' ? new THREE.CanvasTexture(emisCanvas) : null,
+        cloudMap: cloudTex,
+        badgeCanvas
+      };
+    }
+
+    function createRingTexture(seed) {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 32;
+      const ctx = c.getContext('2d');
+      const rand = mulberry32(seed + 88);
+      for (let x = 0; x < 256; x++) {
+        const t = x / 255;
+        const edge = Math.sin(t * Math.PI);
+        const cassini = (t > 0.56 && t < 0.63) ? 0.12 : 1.0;
+        const band = 0.55 + 0.45 * Math.sin(t * 42 + rand() * 0.4);
+        const alpha = Math.max(0, Math.min(0.82, edge * cassini * band * 0.85));
+        ctx.fillStyle = `rgba(218, 206, 245, ${alpha})`;
+        ctx.fillRect(x, 0, 1, 32);
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    // =========================================================================
+    // 2. STATE & CONVERSATIONS
+    // =========================================================================
+    const initialConversations = [
+      {
+        id: 'p1',
+        title: '架构设计与代码重构',
+        seed: 104729,
+        archetype: ARCHETYPES[0],
+        tokens: 42000,
+        angle: 0.5,
+        ringTilt: 0.35,
+        messages: [
+          { role: 'user', text: '把桌面悬浮窗升级成真正的三维物理渲染，还要有高级感的扁平化 UI。' },
+          { role: 'ai', text: '已接入 Three.js PBR 管线：中央恒星使用 3D 噪声光球着色器与磁环日珥，各行星带有法线凹凸贴图、云层与相互投影遮挡。' }
+        ]
+      },
+      {
+        id: 'p2',
+        title: '视觉着色器调优',
+        seed: 224737,
+        archetype: ARCHETYPES[1],
+        tokens: 88000,
+        angle: 1.9,
+        ringTilt: -0.25,
+        messages: [
+          { role: 'user', text: '气态巨星的涡旋风暴和大气散射光效表现如何？' },
+          { role: 'ai', text: '已使用球面 3D FBM 生成无接缝条纹与反气旋风暴眼，并叠加了基于视角法线的菲涅尔大气散射层。' }
+        ]
+      },
+      {
+        id: 'p3',
+        title: '今日日程与灵感',
+        seed: 350377,
+        archetype: ARCHETYPES[2],
+        tokens: 14000,
+        angle: 3.3,
+        ringTilt: 0.2,
+        messages: [
+          { role: 'user', text: '待机时恒星放大、行星微缩绕黄道面公转的效果很赞。' },
+          { role: 'ai', text: '当前这颗冰巨星上下文较轻，待机时会缩成一颗晶莹的微缩冰点贴近太阳日冕。' }
+        ]
+      },
+      {
+        id: 'p4',
+        title: '性能压测与帧率',
+        seed: 479909,
+        archetype: ARCHETYPES[3],
+        tokens: 64000,
+        angle: 4.7,
+        ringTilt: -0.4,
+        messages: [
+          { role: 'user', text: '熔岩行星在暗面能看到岩浆裂谷自发光吗？' },
+          { role: 'ai', text: '可以，已为熔岩行星配置独立的 EmissiveMap 自发光通道，在背光暗面会透出炽热岩浆纹理。' }
+        ]
+      },
+      {
+        id: 'p5',
+        title: '暗黑扁平化 UI 规范',
+        seed: 611953,
+        archetype: ARCHETYPES[5],
+        tokens: 108000,
+        angle: 5.5,
+        ringTilt: 0.42,
+        messages: [
+          { role: 'user', text: 'UI 面板需要更克制、更有高级感的细线条与字体排版。' },
+          { role: 'ai', text: '已切换为 1px 极细半透明描边（rgba 8.5% 白）、轻字重 Inter 与等宽 JetBrains Mono 遥测标签。' }
+        ]
+      }
+    ];
+
+    const state = {
+      planets: [],
+      activePlanetId: 'p1',
+      focusedIndex: 0,
+      viewMode: 'chat',
+      isHovered: false,
+      forceHover: false,
+      showBounds: true,
+      hoverSpring: 0,
+      hoverVel: 0,
+      mouseX: 135,
+      mouseY: 135,
+      orbitSpeedMul: 1.0,
+      sunGlowMul: 1.0,
+      gravityEnabled: true,
+      hoveredTarget: null
+    };
+
+    // =========================================================================
+    // 3. THREE.JS 3D SCENE (SUN SHADER, PROMINENCES, PBR PLANETS & SHADOWS)
+    // =========================================================================
+    const glCanvas = document.getElementById('galaxyCanvas');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const octx = overlayCanvas.getContext('2d');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    overlayCanvas.width = 270 * dpr;
+    overlayCanvas.height = 270 * dpr;
+    octx.scale(dpr, dpr);
+
+    const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(270, 270, false);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(34, 1, 1, 1000);
+    camera.position.set(0, 120, 340);
+    camera.lookAt(0, 0, 0);
+
+    // Subtle deep-space starfield
+    const starGeo = new THREE.BufferGeometry();
+    const starCount = 180;
+    const starPos = new Float32Array(starCount * 3);
+    const starRand = mulberry32(4242);
+    for (let i = 0; i < starCount; i++) {
+      starPos[i * 3] = (starRand() - 0.5) * 420;
+      starPos[i * 3 + 1] = (starRand() - 0.5) * 320;
+      starPos[i * 3 + 2] = -140 - starRand() * 200;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xcbd8ff, size: 1.1, transparent: true, opacity: 0.45 });
+    const starField = new THREE.Points(starGeo, starMat);
+    scene.add(starField);
+
+    // Lighting: Central Sun PointLight + lifted ambient/hemisphere fill for shadow detail without blowing highlights
+    const sunLight = new THREE.PointLight(0xffdfad, 2.55, 700, 0.35);
+    sunLight.position.set(0, 0, 0);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
+    sunLight.shadow.camera.near = 4;
+    sunLight.shadow.camera.far = 300;
+    sunLight.shadow.bias = -0.0015;
+    scene.add(sunLight);
+
+    const ambientLight = new THREE.AmbientLight(0x3a4766, 0.85);
+    scene.add(ambientLight);
+    const hemiLight = new THREE.HemisphereLight(0x4c5d82, 0x263047, 0.55);
+    scene.add(hemiLight);
+
+    // Custom GLSL Solar Photosphere (Granulation + Sunspots + Limb Darkening)
+    const sunUniforms = {
+      uTime: { value: 0 },
+      uGlow: { value: 1.0 }
+    };
+
+    const sunMaterial = new THREE.ShaderMaterial({
+      uniforms: sunUniforms,
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vPos;
+        varying vec3 vViewDir;
+        void main() {
+          vPos = position;
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          vNormal = normalize(normalMatrix * normal);
+          vViewDir = normalize(-mvPos.xyz);
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uGlow;
+        varying vec3 vNormal;
+        varying vec3 vPos;
+        varying vec3 vViewDir;
+
+        float hash(vec3 p) {
+          p = fract(p * 0.3183099 + 0.1);
+          p *= 17.0;
+          return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+
+        float noise(vec3 x) {
+          vec3 i = floor(x);
+          vec3 f = fract(x);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+        }
+
+        float fbm(vec3 p) {
+          float v = 0.0;
+          float a = 0.5;
+          for (int i = 0; i < 5; i++) {
+            v += a * noise(p);
+            p = p * 2.05 + vec3(0.13, 0.27, 0.19);
+            a *= 0.5;
+          }
+          return v;
+        }
+
+        void main() {
+          vec3 p = normalize(vPos);
+          float t = uTime * 0.14;
+
+          // Solar granulation & boiling plasma
+          float gran = fbm(p * 6.5 + vec3(t, -t * 0.6, t * 0.4));
+          float detail = fbm(p * 16.0 - vec3(t * 1.4, t * 0.8, 0.0));
+          float plasma = gran * 0.7 + detail * 0.3;
+
+          // Sunspots (fine, small dark magnetic pores & spot groups)
+          float spotField = fbm(p * 10.5 + vec3(t * 0.22, 0.0, -t * 0.18));
+          float spotCluster = fbm(p * 3.8 - vec3(t * 0.1, 0.0, t * 0.1));
+          float spotMask = smoothstep(0.19, 0.25, spotField + spotCluster * 0.14);
+
+          // Limb darkening
+          float ndv = clamp(dot(normalize(vNormal), normalize(vViewDir)), 0.0, 1.0);
+          float limb = pow(ndv, 0.55);
+
+          vec3 hotCore = vec3(1.0, 0.97, 0.86);
+          vec3 midGold = vec3(1.0, 0.64, 0.14);
+          vec3 deepLimb = vec3(0.82, 0.22, 0.02);
+          vec3 sunspotCol = vec3(0.16, 0.04, 0.01);
+
+          vec3 col = mix(deepLimb, midGold, smoothstep(0.15, 0.75, plasma * 0.6 + limb * 0.6));
+          col = mix(col, hotCore, smoothstep(0.68, 0.98, plasma * 0.45 + limb * 0.65));
+          col = mix(sunspotCol, col, spotMask);
+          col *= (0.72 + 0.42 * limb) * (0.85 + 0.2 * uGlow);
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+
+    const sunGroup = new THREE.Group();
+    const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), sunMaterial);
+    sunGroup.add(sunMesh);
+
+    // 3D Solar Prominences (Magnetic Plasma Loops)
+    const promMat = new THREE.MeshBasicMaterial({
+      color: 0xff7b24,
+      transparent: true,
+      opacity: 0.68,
+      blending: THREE.AdditiveBlending
+    });
+    const prominenceConfigs = [
+      { rx: 0.4, ry: 0.8, rz: 0.2, scale: 1.08 },
+      { rx: -0.7, ry: 2.1, rz: 0.5, scale: 1.12 },
+      { rx: 1.1, ry: 3.8, rz: -0.3, scale: 1.06 },
+      { rx: -0.3, ry: 5.0, rz: 0.8, scale: 1.10 }
+    ];
+    prominenceConfigs.forEach((cfg) => {
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.92, -0.25, 0),
+        new THREE.Vector3(1.18 * cfg.scale, -0.1, 0.08),
+        new THREE.Vector3(1.22 * cfg.scale, 0.12, -0.05),
+        new THREE.Vector3(0.92, 0.28, 0)
+      ]);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.022, 8, false), promMat);
+      tube.rotation.set(cfg.rx, cfg.ry, cfg.rz);
+      sunGroup.add(tube);
+    });
+
+    // Volumetric Corona Sprite
+    const coronaCanvas = document.createElement('canvas');
+    coronaCanvas.width = 256; coronaCanvas.height = 256;
+    const cctx = coronaCanvas.getContext('2d');
+    const cGrad = cctx.createRadialGradient(128, 128, 22, 128, 128, 128);
+    cGrad.addColorStop(0, 'rgba(255, 225, 165, 0.72)');
+    cGrad.addColorStop(0.26, 'rgba(245, 158, 11, 0.34)');
+    cGrad.addColorStop(0.55, 'rgba(234, 88, 12, 0.10)');
+    cGrad.addColorStop(1, 'rgba(234, 88, 12, 0)');
+    cctx.fillStyle = cGrad;
+    cctx.fillRect(0, 0, 256, 256);
+
+    const coronaSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(coronaCanvas),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    }));
+    sunGroup.add(coronaSprite);
+    scene.add(sunGroup);
+
+    // Atmospheric Fresnel Rim Shader for Planets
+    function createAtmosphereMaterial(hexColor) {
+      return new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: new THREE.Color(hexColor) }
+        },
+        vertexShader: `
+          varying vec3 vNormal;
+          varying vec3 vViewDir;
+          void main() {
+            vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+            vNormal = normalize(normalMatrix * normal);
+            vViewDir = normalize(-mvPos.xyz);
+            gl_Position = projectionMatrix * mvPos;
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 uColor;
+          varying vec3 vNormal;
+          varying vec3 vViewDir;
+          void main() {
+            float fresnel = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewDir)), 0.0, 1.0), 3.0);
+            gl_FragColor = vec4(uColor, fresnel * 0.72);
+          }
+        `,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        side: THREE.FrontSide,
+        depthWrite: false
+      });
+    }
+
+    const sharedSphereGeo = new THREE.SphereGeometry(1, 36, 36);
+
+    function createPlanetEntity(conv, idx) {
+      const maps = generatePlanetMaps(conv.seed, conv.archetype);
+      const group = new THREE.Group();
+
+      const matOpts = {
+        map: maps.map,
+        bumpMap: maps.bumpMap,
+        bumpScale: 0.06,
+        roughness: conv.archetype.rough,
+        metalness: 0.04
+      };
+      if (maps.emissiveMap) {
+        matOpts.emissive = new THREE.Color(0xff5511);
+        matOpts.emissiveMap = maps.emissiveMap;
+        matOpts.emissiveIntensity = 1.6;
+      }
+
+      const body = new THREE.Mesh(sharedSphereGeo, new THREE.MeshStandardMaterial(matOpts));
+      body.castShadow = true;
+      body.receiveShadow = true;
+      group.add(body);
+
+      let clouds = null;
+      if (maps.cloudMap) {
+        clouds = new THREE.Mesh(
+          sharedSphereGeo,
+          new THREE.MeshStandardMaterial({
+            map: maps.cloudMap,
+            transparent: true,
+            opacity: 0.85,
+            depthWrite: false,
+            roughness: 0.9
+          })
+        );
+        clouds.scale.setScalar(1.025);
+        clouds.castShadow = true;
+        clouds.receiveShadow = true;
+        group.add(clouds);
+      }
+
+      const atmo = new THREE.Mesh(sharedSphereGeo, createAtmosphereMaterial(conv.archetype.rim));
+      atmo.scale.setScalar(1.06);
+      group.add(atmo);
+
+      if (conv.archetype.hasRing) {
+        const ringGeo = new THREE.RingGeometry(1.35, 2.25, 64);
+        // Remap UV radially for RingGeometry
+        const pos = ringGeo.attributes.position;
+        const uv = ringGeo.attributes.uv;
+        const v3 = new THREE.Vector3();
+        for (let i = 0; i < pos.count; i++) {
+          v3.fromBufferAttribute(pos, i);
+          const rad = (v3.length() - 1.35) / (2.25 - 1.35);
+          uv.setXY(i, rad, 0.5);
+        }
+        const ringMat = new THREE.MeshStandardMaterial({
+          map: createRingTexture(conv.seed),
+          transparent: true,
+          side: THREE.DoubleSide,
+          roughness: 0.8,
+          depthWrite: false
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.x = Math.PI / 2 - 0.32;
+        ring.rotation.y = conv.ringTilt;
+        ring.castShadow = true;
+        ring.receiveShadow = true;
+        group.add(ring);
+      }
+
+      scene.add(group);
+
+      // Orbit ring in 3D XZ plane
+      const orbitPts = [];
+      for (let i = 0; i <= 96; i++) {
+        const a = (i / 96) * Math.PI * 2;
+        orbitPts.push(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)));
+      }
+      const orbitGeo = new THREE.BufferGeometry().setFromPoints(orbitPts);
+      const orbitMat = new THREE.LineBasicMaterial({
+        color: 0x94a3b8,
+        transparent: true,
+        opacity: 0.14
+      });
+      const orbitLine = new THREE.LineLoop(orbitGeo, orbitMat);
+      scene.add(orbitLine);
+
+      return {
+        ...conv,
+        maps,
+        group,
+        body,
+        clouds,
+        orbitLine,
+        orbitMat,
+        currentRadius: 2.5,
+        currentOrbit: 56 + idx * 5,
+        screenX: 135,
+        screenY: 135,
+        screenR: 5,
+        depthZ: 0
+      };
+    }
+
+    state.planets = initialConversations.map((c, idx) => createPlanetEntity(c, idx));
+
+    function getTargetPlanetRadius(tokens, expandedFactor, isFocused) {
+      const norm = Math.max(0, Math.min(1, (tokens - 1000) / 127000));
+      const volumeScale = Math.pow(norm, 0.55);
+      const activeR = 6.2 + volumeScale * 11.8;
+      const standbyR = 1.35 + volumeScale * 1.15;
+      let r = lerp(standbyR, activeR, expandedFactor);
+      if (isFocused && expandedFactor > 0.25) {
+        r *= lerp(1, 1.24, expandedFactor);
+      }
+      return r;
+    }
+
+    let lastTime = performance.now();
+    const projVec = new THREE.Vector3();
+
+    function tick(now) {
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+      const t = now / 1000;
+
+      // Spring physics
+      const targetHover = (state.isHovered || state.forceHover) ? 1 : 0;
+      const force = (targetHover - state.hoverSpring) * 130 - state.hoverVel * 16;
+      state.hoverVel += force * dt;
+      state.hoverSpring = Math.max(0, Math.min(1.08, state.hoverSpring + state.hoverVel * dt));
+      const ef = Math.max(0, Math.min(1, state.hoverSpring));
+
+      // Camera oblique ecliptic elevation
+      camera.position.set(0, lerp(92, 138, ef), lerp(345, 315, ef));
+      camera.lookAt(0, 0, 0);
+
+      // Update Sun 3D scale, shader, prominences, corona
+      const sunScale = lerp(45, 16.5, ef);
+      sunGroup.scale.setScalar(sunScale);
+      sunGroup.rotation.y = t * 0.08;
+      sunUniforms.uTime.value = t;
+      sunUniforms.uGlow.value = state.sunGlowMul;
+      promMat.opacity = (0.48 + 0.16 * Math.sin(t * 1.8)) * state.sunGlowMul;
+      const coronaScale = lerp(4.2, 5.2, ef) * state.sunGlowMul;
+      coronaSprite.scale.set(coronaScale, coronaScale, 1);
+
+      // Background stars fade gently
+      starMat.opacity = 0.18 + ef * 0.45;
+      starField.rotation.y = t * 0.008;
+
+      // Update Planets & Orbits
+      const n = state.planets.length;
+      const minStandbyOrbit = 52;
+      const maxStandbyOrbit = 70;
+      const minExpandedOrbit = 44;
+      const maxExpandedOrbit = 110;
+
+      state.planets.forEach((p, idx) => {
+        const frac = n <= 1 ? 0.5 : idx / (n - 1);
+        const targetOrbit = lerp(
+          minStandbyOrbit + frac * (maxStandbyOrbit - minStandbyOrbit),
+          minExpandedOrbit + frac * (maxExpandedOrbit - minExpandedOrbit),
+          ef
+        );
+        p.currentOrbit = lerp(p.currentOrbit, targetOrbit, Math.min(1, dt * 10));
+
+        const isFocused = idx === state.focusedIndex;
+        const targetR = getTargetPlanetRadius(p.tokens, ef, isFocused);
+        p.currentRadius = lerp(p.currentRadius, targetR, Math.min(1, dt * 10));
+
+        const baseOmega = (0.36 / Math.pow(Math.max(24, p.currentOrbit) / 45, 1.15)) * state.orbitSpeedMul;
+        const hoverSlowdown = lerp(1.0, 0.25, ef);
+        p.angle += baseOmega * hoverSlowdown * dt;
+
+        let px = Math.cos(p.angle) * p.currentOrbit;
+        let pz = Math.sin(p.angle) * p.currentOrbit;
+        const py = Math.sin(p.angle * 2 + idx) * (1.5 * ef); // slight orbital inclination
+
+        // Light mouse gravitational perturbation
+        if (state.gravityEnabled && ef > 0.2) {
+          const mouseWorldX = ((state.mouseX - 135) / 135) * 115;
+          const mouseWorldZ = ((state.mouseY - 135) / 135) * 115;
+          const mdx = mouseWorldX - px;
+          const mdz = mouseWorldZ - pz;
+          const mdist = Math.hypot(mdx, mdz);
+          if (mdist < 65 && mdist > 1) {
+            const pull = (1 - mdist / 65) * 5.0 * ef;
+            px += (mdx / mdist) * pull;
+            pz += (mdz / mdist) * pull;
+          }
+        }
+
+        p.group.position.set(px, py, pz);
+        p.group.scale.setScalar(p.currentRadius);
+        p.body.rotation.y += dt * (0.35 + idx * 0.06);
+        if (p.clouds) p.clouds.rotation.y += dt * 0.48;
+
+        p.orbitLine.scale.set(p.currentOrbit, 1, p.currentOrbit);
+        if (isFocused && ef > 0.3) {
+          p.orbitMat.color.setHex(0xf59e0b);
+          p.orbitMat.opacity = 0.34 * ef;
+        } else {
+          p.orbitMat.color.setHex(0x94a3b8);
+          p.orbitMat.opacity = 0.04 + 0.08 * ef;
+        }
+
+        // Project 3D position to 2D 270x270 screen coordinates
+        projVec.copy(p.group.position).project(camera);
+        p.screenX = (projVec.x * 0.5 + 0.5) * 270;
+        p.screenY = (-projVec.y * 0.5 + 0.5) * 270;
+        p.depthZ = projVec.z;
+        p.screenR = Math.max(2, p.currentRadius * (340 / Math.max(80, camera.position.distanceTo(p.group.position))));
+      });
+
+      renderer.render(scene, camera);
+
+      // Draw crisp 2D hairline reticle overlay
+      octx.clearRect(0, 0, 270, 270);
+      if (ef > 0.3) {
+        const fp = state.planets[state.focusedIndex];
+        if (fp) {
+          octx.save();
+          octx.strokeStyle = 'rgba(245, 158, 11, 0.78)';
+          octx.lineWidth = 1;
+          const rr = fp.screenR + 5;
+          const gap = 0.45;
+          for (let q = 0; q < 4; q++) {
+            octx.beginPath();
+            octx.arc(fp.screenX, fp.screenY, rr, q * (Math.PI / 2) + gap, (q + 1) * (Math.PI / 2) - gap);
+            octx.stroke();
+          }
+          octx.restore();
+        }
+      }
+
+      if (state.hoveredTarget === 'sun') {
+        const sunScreenR = lerp(45, 16.5, ef) * 0.98;
+        octx.save();
+        octx.strokeStyle = 'rgba(255, 232, 179, 0.55)';
+        octx.lineWidth = 1;
+        octx.beginPath();
+        octx.arc(135, 135, sunScreenR + 4, 0, Math.PI * 2);
+        octx.stroke();
+        octx.restore();
+      }
+
+      requestAnimationFrame(tick);
+    }
+
+    // =========================================================================
+    // 4. INTERACTIONS
+    // =========================================================================
+    const widgetEl = document.getElementById('widgetContainer');
+    const hudPill = document.getElementById('hudPill');
+    const hudDot = document.getElementById('hudDot');
+    const hudTitle = document.getElementById('hudTitle');
+    const hudMeta = document.getElementById('hudMeta');
+    const stateDot = document.getElementById('stateDot');
+    const stateText = document.getElementById('stateText');
+
+    function updateHudAndStatus() {
+      const expanded = state.isHovered || state.forceHover;
+      if (expanded) {
+        stateDot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+        stateText.textContent = state.forceHover ? 'LOCKED · 展开锁定' : 'ACTIVE · 星系展开';
+        hudPill.classList.remove('opacity-0', 'translate-y-1');
+        hudPill.classList.add('opacity-100', 'translate-y-0');
+      } else {
+        stateDot.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+        stateText.textContent = 'STANDBY · 待机恒星';
+        hudPill.classList.add('opacity-0', 'translate-y-1');
+        hudPill.classList.remove('opacity-100', 'translate-y-0');
+      }
+
+      if (state.hoveredTarget === 'sun') {
+        hudDot.style.backgroundColor = '#f59e0b';
+        hudTitle.textContent = 'SOLAR CORE · 全局设置';
+        hudMeta.textContent = 'CLICK';
+      } else {
+        const p = state.planets[state.focusedIndex] || state.planets[0];
+        if (p) {
+          hudDot.style.backgroundColor = p.archetype.dot;
+          hudTitle.textContent = p.title;
+          hudMeta.textContent = `${Math.round(p.tokens / 1000)}K · 滚轮`;
+        }
+      }
+    }
+
+    function hitTest(mx, my) {
+      const ef = Math.max(0, Math.min(1, state.hoverSpring));
+      const sunHitR = lerp(45, 16.5, ef) + 4;
+
+      // Sort planets front-to-back by projected depthZ
+      const sorted = state.planets
+        .map(p => p)
+        .sort((a, b) => a.depthZ - b.depthZ);
+
+      // Front planets in front of sun
+      for (const p of sorted) {
+        if (p.depthZ < 0.996 && Math.hypot(mx - p.screenX, my - p.screenY) <= Math.max(10, p.screenR + 5)) {
+          // Check if behind sun
+          const sunDist = Math.hypot(mx - 135, my - 135);
+          const pDist3D = camera.position.distanceTo(p.group.position);
+          const sunDist3D = camera.position.length();
+          if (pDist3D < sunDist3D || sunDist > sunHitR) {
+            return p.id;
+          }
+        }
+      }
+      if (Math.hypot(mx - 135, my - 135) <= sunHitR) {
+        return 'sun';
+      }
+      return null;
+    }
+
+    widgetEl.addEventListener('mouseenter', () => {
+      state.isHovered = true;
+      updateHudAndStatus();
+    });
+
+    widgetEl.addEventListener('mouseleave', () => {
+      state.isHovered = false;
+      state.hoveredTarget = null;
+      updateHudAndStatus();
+    });
+
+    glCanvas.addEventListener('mousemove', (e) => {
+      const rect = glCanvas.getBoundingClientRect();
+      state.mouseX = e.clientX - rect.left;
+      state.mouseY = e.clientY - rect.top;
+      const hit = hitTest(state.mouseX, state.mouseY);
+      if (hit !== state.hoveredTarget) {
+        state.hoveredTarget = hit;
+        if (hit && hit !== 'sun') {
+          const idx = state.planets.findIndex(p => p.id === hit);
+          if (idx !== -1) state.focusedIndex = idx;
+        }
+        updateHudAndStatus();
+      }
+    });
+
+    widgetEl.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (state.planets.length === 0) return;
+      const dir = e.deltaY > 0 ? 1 : -1;
+      state.focusedIndex = (state.focusedIndex + dir + state.planets.length) % state.planets.length;
+      const p = state.planets[state.focusedIndex];
+      state.activePlanetId = p.id;
+      syncTokenSlider();
+      updateHudAndStatus();
+      if (state.viewMode === 'chat') {
+        renderChatWindow();
+      }
+    }, { passive: false });
+
+    glCanvas.addEventListener('click', (e) => {
+      const rect = glCanvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const hit = hitTest(mx, my);
+      if (hit === 'sun') {
+        openCoreSettings();
+      } else if (hit) {
+        const idx = state.planets.findIndex(p => p.id === hit);
+        if (idx !== -1) {
+          state.focusedIndex = idx;
+          state.activePlanetId = hit;
+          openChatWindow();
+        }
+      }
+    });
+
+    // =========================================================================
+    // 5. FLAT DARK UI CONTROLLERS
+    // =========================================================================
+    const chatView = document.getElementById('chatView');
+    const coreView = document.getElementById('coreView');
+    const chatTitle = document.getElementById('chatTitle');
+    const chatTypeTag = document.getElementById('chatTypeTag');
+    const chatContextBar = document.getElementById('chatContextBar');
+    const chatTokensText = document.getElementById('chatTokensText');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatPlanetBadge = document.getElementById('chatPlanetBadge');
+    const simTokenSlider = document.getElementById('simTokenSlider');
+    const simTokenReadout = document.getElementById('simTokenReadout');
+
+    function getActivePlanet() {
+      return state.planets.find(p => p.id === state.activePlanetId) || state.planets[0];
+    }
+
+    function syncTokenSlider() {
+      const p = getActivePlanet();
+      if (!p) return;
+      simTokenSlider.value = p.tokens;
+      simTokenReadout.textContent = `${p.tokens.toLocaleString()} TOKENS`;
+    }
+
+    function renderChatWindow() {
+      const p = getActivePlanet();
+      if (!p) return;
+
+      chatTitle.textContent = p.title;
+      chatTypeTag.textContent = p.archetype.label;
+      const pct = Math.min(100, Math.round((p.tokens / 128000) * 100));
+      chatContextBar.style.width = `${pct}%`;
+      chatTokensText.textContent = `${Math.round(p.tokens / 1000)}K / 128K`;
+
+      const bctx = chatPlanetBadge.getContext('2d');
+      bctx.clearRect(0, 0, 24, 24);
+      bctx.drawImage(p.maps.badgeCanvas, 0, 0, 24, 24);
+
+      chatMessages.innerHTML = '';
+      p.messages.forEach(m => {
+        const wrap = document.createElement('div');
+        wrap.className = m.role === 'user' ? 'flex justify-end' : 'flex justify-start';
+        const bubble = document.createElement('div');
+        bubble.className = m.role === 'user'
+          ? 'max-w-[85%] px-3 py-2 rounded border border-white/[0.12] bg-white/[0.04] text-[#eef0f6]'
+          : 'max-w-[88%] px-3 py-2 rounded border border-white/[0.06] bg-[#090b0f] text-[#b4bccf]';
+        bubble.textContent = m.text;
+        wrap.appendChild(bubble);
+        chatMessages.appendChild(wrap);
+      });
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      syncTokenSlider();
+    }
+
+    function renderCoreDirectory() {
+      const list = document.getElementById('corePlanetList');
+      document.getElementById('planetCountText').textContent = state.planets.length;
+      list.innerHTML = '';
+      state.planets.forEach((p, idx) => {
+        const row = document.createElement('button');
+        row.className = 'w-full flex items-center justify-between px-3 py-2 rounded border border-white/[0.07] hover:border-white/[0.16] bg-[#090b0f]/60 text-left transition-colors cursor-pointer';
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${p.archetype.dot}"></span>
+            <span class="text-[12px] font-light text-[#eef0f6] truncate">${p.title}</span>
+          </div>
+          <span class="text-[10px] mono text-[#98a0b3] shrink-0">${Math.round(p.tokens / 1000)}K</span>
+        `;
+        row.addEventListener('click', () => {
+          state.focusedIndex = idx;
+          state.activePlanetId = p.id;
+          openChatWindow();
+        });
+        list.appendChild(row);
+      });
+    }
+
+    function openChatWindow() {
+      state.viewMode = 'chat';
+      coreView.classList.add('hidden');
+      coreView.classList.remove('flex');
+      chatView.classList.remove('hidden');
+      chatView.classList.add('flex');
+      renderChatWindow();
+      updateHudAndStatus();
+    }
+
+    function openCoreSettings() {
+      state.viewMode = 'core';
+      chatView.classList.add('hidden');
+      chatView.classList.remove('flex');
+      coreView.classList.remove('hidden');
+      coreView.classList.add('flex');
+      renderCoreDirectory();
+      updateHudAndStatus();
+    }
+
+    function addNewPlanet() {
+      const idx = state.planets.length;
+      const arch = ARCHETYPES[Math.floor(Math.random() * ARCHETYPES.length)];
+      const seed = Math.floor(Math.random() * 900000) + 100000;
+      const conv = {
+        id: 'p_' + Date.now(),
+        title: `新对话轨道 #${idx + 1}`,
+        seed,
+        archetype: arch,
+        tokens: 4000,
+        angle: Math.random() * Math.PI * 2,
+        ringTilt: (Math.random() - 0.5) * 0.8,
+        messages: [
+          { role: 'ai', text: `已生成新的三维${arch.label}节点。随上下文增加，其质量与体积将同步膨胀。` }
+        ]
+      };
+      const entity = createPlanetEntity(conv, idx);
+      state.planets.push(entity);
+      state.focusedIndex = state.planets.length - 1;
+      state.activePlanetId = entity.id;
+      openChatWindow();
+      renderCoreDirectory();
+    }
+
+    document.getElementById('chatForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+      const p = getActivePlanet();
+      if (!p) return;
+      p.messages.push({ role: 'user', text });
+      p.tokens = Math.min(128000, p.tokens + 8000);
+      p.messages.push({
+        role: 'ai',
+        text: `已同步至上下文（${Math.round(p.tokens / 1000)}K tokens），三维行星半径已实时放大。`
+      });
+      input.value = '';
+      renderChatWindow();
+      updateHudAndStatus();
+    });
+
+    simTokenSlider.addEventListener('input', (e) => {
+      const p = getActivePlanet();
+      if (!p) return;
+      p.tokens = parseInt(e.target.value, 10);
+      renderChatWindow();
+      updateHudAndStatus();
+    });
+
+    document.getElementById('btnOpenCoreFromChat').addEventListener('click', openCoreSettings);
+    document.getElementById('btnBackToChat').addEventListener('click', openChatWindow);
+    document.getElementById('btnAddPlanet').addEventListener('click', addNewPlanet);
+    document.getElementById('btnAddPlanetFromCore').addEventListener('click', addNewPlanet);
+
+    document.getElementById('btnDeletePlanet').addEventListener('click', () => {
+      if (state.planets.length <= 1) return;
+      const idx = state.planets.findIndex(p => p.id === state.activePlanetId);
+      if (idx !== -1) {
+        const removed = state.planets.splice(idx, 1)[0];
+        scene.remove(removed.group);
+        scene.remove(removed.orbitLine);
+        state.focusedIndex = Math.max(0, Math.min(state.focusedIndex, state.planets.length - 1));
+        state.activePlanetId = state.planets[state.focusedIndex].id;
+        renderChatWindow();
+        updateHudAndStatus();
+      }
+    });
+
+    document.getElementById('btnToggleBounds').addEventListener('click', (e) => {
+      state.showBounds = !state.showBounds;
+      widgetEl.classList.toggle('show-bounds', state.showBounds);
+      e.target.textContent = state.showBounds ? '隐藏 270×270 边界' : '显示 270×270 边界';
+    });
+
+    document.getElementById('btnForceHover').addEventListener('click', (e) => {
+      state.forceHover = !state.forceHover;
+      e.target.textContent = state.forceHover ? '取消锁定展开' : '锁定展开态';
+      e.target.classList.toggle('border-amber-500/50', state.forceHover);
+      e.target.classList.toggle('text-amber-300', state.forceHover);
+      updateHudAndStatus();
+    });
+
+    document.getElementById('settingOrbitSpeed').addEventListener('input', (e) => {
+      state.orbitSpeedMul = parseFloat(e.target.value);
+      document.getElementById('orbitSpeedVal').textContent = `${state.orbitSpeedMul.toFixed(1)}×`;
+    });
+
+    document.getElementById('settingSunGlow').addEventListener('input', (e) => {
+      state.sunGlowMul = parseFloat(e.target.value);
+      document.getElementById('sunGlowVal').textContent = `${Math.round(state.sunGlowMul * 100)}%`;
+    });
+
+    document.getElementById('settingGravity').addEventListener('change', (e) => {
+      state.gravityEnabled = e.target.checked;
+    });
+
+    renderChatWindow();
+    updateHudAndStatus();
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

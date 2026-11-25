@@ -291,10 +291,10 @@ class Controller(QObject):
         row["formatted"] = format_message(row["text"])
         self.bridge.set_messages(self.messages)
 
-def main():
+def main(*, launcher_class=ControlBall, qml_path=None, data_name="flashUnstander"):
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
-    directory = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "flashUnstander"
+    directory = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / data_name
     directory.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(directory / "application.lock"))
     if not lock.tryLock(0):
@@ -313,14 +313,14 @@ def main():
         first = False
         return controller
 
-    manager = WindowManager(controller_factory)
+    manager = WindowManager(controller_factory, qml_path=qml_path)
     try:
         desktop = DesktopIntegration(app)
         controls = ControlBridge(manager, app.quit, lambda: SettingsDialog(runtime).exec())
         desktop.hotkeyRequested.connect(controls.openNew)
         desktop.showRequested.connect(controls.showAll)
         desktop.quitRequested.connect(controls.quit)
-        ball = ControlBall(app, controls, shortcut_available=desktop.register_hotkey())
+        ball = launcher_class(app, controls, shortcut_available=desktop.register_hotkey())
         ball.show()
         return app.exec()
     finally:

@@ -21,6 +21,14 @@ class ControlBridge(QObject):
     def visibleCount(self):
         return sum(window.isVisible() for window, *_ in self._manager.windows)
 
+    @Slot(int)
+    def openWindow(self, index):
+        if 0 <= index < self.windowCount:
+            window = self._manager.windows[index][0]
+            self._manager._show_window(window)
+            window.raise_()
+            window.requestActivate()
+
     @Slot()
     def openRecent(self):
         self._manager.show_recent()

@@ -15,6 +15,7 @@ jaraco.functools==4.6.0
 jiter==0.19.0
 keyring==25.7.0
 more-itertools==11.2.1
+numpy==2.3.5
 openai==3.55.1
 packaging==26.3
 pefile==2024.8.26

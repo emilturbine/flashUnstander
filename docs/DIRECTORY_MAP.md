@@ -31,3 +31,6 @@
 - `.scratch/`、`build/`、`dist/`：临时文件及构建产物，不提交。
 
 运行数据和凭据不存放于项目目录。
+
+- `examples/classic_qt/`：可独立启动的经典 Qt 开发示例。
+- `examples/reference/`：星系界面的 HTML 参考原型。
