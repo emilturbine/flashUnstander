@@ -17,8 +17,8 @@ class Orbit:
     def axis(self, expansion):
         return 61 + 24*self.lane + (1 + 22*self.lane)*expansion
 
-    def position(self, anomaly, expansion):
-        axis = self.axis(expansion)
+    def position(self, anomaly, expansion, axis=None):
+        axis = self.axis(expansion) if axis is None else axis
         major = axis * (cos(anomaly) - self.eccentricity)
         minor = axis * sqrt(1 - self.eccentricity**2) * sin(anomaly)
         vertical = minor * self.cos_inclination
@@ -41,8 +41,44 @@ def orbit_for(index):
     node = -.34 + .10*sin(2.1*index)
     inclination = 1.05 + .12*cos(1.8*index)
     motion = .31 * (62 / (62 + 46*lane))**1.5
-    return Orbit(lane, .052 + .055*lane, cos(node), sin(node),
+    return Orbit(lane, .055, cos(node), sin(node),
                  cos(inclination), sin(inclination), motion)
+
+
+@dataclass(frozen=True)
+class PlanetMaterial:
+    density: float  # Approximate bulk density in g/cm³.
+    radius_scale: float
+    growth_exponent: float
+
+
+PLANET_MATERIALS = (
+    PlanetMaterial(4.8, 2 / 3, .55),  # Earth-like ocean and continents
+    PlanetMaterial(5.5, .96 * (2 / 3), .64),   # Dense rocky desert
+    PlanetMaterial(1.1, 1.07 * 1.25, .48),  # Ringed gas giant
+    PlanetMaterial(1.7, 1.03, .51),  # Ice giant
+)
+
+
+EXPANDED_RADIUS_SCALE = 1.32
+
+
+def planet_radius(tokens, expansion, material):
+    tokens = min(100_000, max(0, tokens))
+    exponent = material.growth_exponent
+    growth = ((1 + tokens/8000)**exponent - 1) / (13.5**exponent - 1)
+    standby_radius = material.radius_scale * (9 + 4.5*growth)
+    return standby_radius * (1 + expansion * (EXPANDED_RADIUS_SCALE - 1))
+
+
+def planet_mass_ratio(radius, material):
+    """Planet mass in stylized stellar units, from bulk density × volume."""
+    return (material.density / 4.8) * (radius / 9)**3 / 80
+
+
+def orbital_speed(axis, mass_ratio):
+    """Mean angular speed from Kepler's third law, including planet mass."""
+    return .31 * sqrt(1 + mass_ratio) * (70 / axis)**1.5
 
 
 def project(x, y, z):

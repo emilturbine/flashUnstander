@@ -74,6 +74,8 @@ ApplicationWindow {
         anchors.margins: 10
         spacing: 6
         RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: false
             Label {
                 text: "flashUnstander"
                 color: window.foreground
@@ -81,7 +83,6 @@ ApplicationWindow {
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true
-                Layout.fillHeight: true
                 verticalAlignment: Text.AlignVCenter
                 MouseArea {
                     objectName: "windowDragRegion"

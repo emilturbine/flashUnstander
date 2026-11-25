@@ -1,13 +1,20 @@
 """A small desktop launcher with a circular native hit region."""
 
-from math import exp, hypot
+from math import exp, hypot, tau
 from time import monotonic
 
 from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
 from PySide6.QtGui import QRegion, QPainter, QColor, QRadialGradient, QPen, QPolygonF
 from .cosmic import sphere
-from .orbit import guide_points, orbit_for, project
+from .orbit import (
+    PLANET_MATERIALS, guide_points, orbit_for, orbital_speed, planet_mass_ratio,
+    planet_radius, project,
+)
 from PySide6.QtWidgets import QApplication, QMenu, QPushButton
+
+
+STANDBY_STAR_RADIUS = 54
+EXPANDED_STAR_RADIUS = 19
 
 
 class ControlBall(QPushButton):
@@ -38,7 +45,7 @@ class ControlBall(QPushButton):
         self.expansion = 0.
         self._velocity = 0.
         self._last_tick = monotonic()
-        self._orbit_time = 0.
+        self._orbital_angles = []
         self._spin_time = 0.
         self.focused = 0
         self.targets = []
@@ -61,13 +68,39 @@ class ControlBall(QPushButton):
         decay = exp(-frequency*dt)
         self.expansion = target + (offset + impulse*dt)*decay
         self._velocity = (self._velocity - frequency*impulse*dt)*decay
-        self._orbit_time += dt * (1 - .48*self.expansion)
+        masses, _, axes, _ = self._planet_layout()
+        for i, axis in enumerate(axes):
+            if i == len(self._orbital_angles):
+                self._orbital_angles.append((.22 + i*2.39996) % tau)
+            self._orbital_angles[i] = (
+                self._orbital_angles[i] + dt*orbital_speed(axis, masses[i])
+            ) % tau
         self._spin_time += dt
         self.update()
 
-    def _draw_orbit(self, painter, index, orbit):
+    def _star_radius(self):
+        return STANDBY_STAR_RADIUS + self.expansion * (EXPANDED_STAR_RADIUS - STANDBY_STAR_RADIUS)
+
+    def _planet_layout(self):
+        count = self.controls.windowCount
+        masses, sizes = [], []
+        for i in range(count):
+            material = PLANET_MATERIALS[i % len(PLANET_MATERIALS)]
+            tokens = self.controls.contextTokens(i)
+            masses.append(planet_mass_ratio(planet_radius(tokens, 0, material), material))
+            sizes.append(planet_radius(tokens, self.expansion, material))
+        axes = []
+        outer = self._star_radius()
+        for i, size in enumerate(sizes):
+            extent = size * (1.83 if i % 4 == 2 else 1)
+            eccentricity = orbit_for(i).eccentricity
+            axis = (outer + extent + 7) / (1 - eccentricity)
+            axes.append(axis)
+            outer = axis * (1 + eccentricity) + extent
+        return masses, sizes, axes, outer
+
+    def _draw_orbit(self, painter, index, axis):
         e = self.expansion
-        axis = orbit.axis(e)
         points = []
         for ux, uy, uz in guide_points(index):
             x, y, _ = project(axis*ux, axis*uy, axis*uz)
@@ -86,7 +119,11 @@ class ControlBall(QPushButton):
         center = QPointF(self.width()/2, self.height()/2)
         p.translate(center)
         e = self.expansion
-        star_radius = 46 - 27*e
+        star_radius = self._star_radius()
+        _, radii, axes, outer = self._planet_layout()
+        count = len(axes)
+        fit = min(1., 113 / outer)
+        star_radius *= fit
         halo = star_radius * 2.45
         glow = QRadialGradient(0, 0, halo)
         for stop, color in (
@@ -99,25 +136,24 @@ class ControlBall(QPushButton):
         p.setBrush(glow)
         p.drawEllipse(QPointF(), halo, halo)
 
-        count = self.controls.windowCount
         bodies = [(0., -1, 0., 0., star_radius, (0., 0., 1.))]
         for i in range(count):
             orbit = orbit_for(i)
-            self._draw_orbit(p, i, orbit)
-            mean = .22 + i*2.39996 + self._orbit_time*orbit.mean_motion
-            x, y, z = orbit.position(orbit.anomaly(mean), e)
+            axis = axes[i] * fit
+            self._draw_orbit(p, i, axis)
+            mean = self._orbital_angles[i] if i < len(self._orbital_angles) else .22 + i*2.39996
+            x, y, z = orbit.position(orbit.anomaly(mean), e, axis)
             sx, sy, scale = project(x, y, z)
             distance = hypot(x, y, z)
             light = (-x/distance, -y/distance, -z/distance)
-            # Standby retains a full disc and a readable silhouette.
-            radius = (7.8 + (i % 3)*1.25 + (3.0 + 1.6*(i == self.focused))*e)*scale
+            radius = radii[i] * fit * scale
             bodies.append((z, i, sx, sy, radius, light))
 
         self.targets.clear()
         for _, i, x, y, radius, light in sorted(bodies):
             kind = 0 if i < 0 else 1 + i % 4
             spin = self._spin_time * (.055 if i < 0 else .16 + .022*(i % 4)) + kind
-            image, extent = sphere(kind, radius, self.devicePixelRatioF(), light, spin)
+            image, extent = sphere(kind, radius, self.devicePixelRatioF(), light, spin, i + 1)
             p.drawImage(QRectF(x-extent, y-extent, 2*extent, 2*extent), image)
             self.targets.append((center + QPointF(x, y), radius, i))
             if i == self.focused and e > .5:

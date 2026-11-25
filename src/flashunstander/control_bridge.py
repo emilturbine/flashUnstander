@@ -21,6 +21,9 @@ class ControlBridge(QObject):
     def visibleCount(self):
         return sum(window.isVisible() for window, *_ in self._manager.windows)
 
+    def contextTokens(self, index):
+        return self._manager.windows[index][2].context_tokens
+
     @Slot(int)
     def openWindow(self, index):
         if 0 <= index < self.windowCount:

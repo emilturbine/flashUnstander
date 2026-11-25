@@ -21,6 +21,7 @@ class WindowBridge(QObject):
         self._provider = "deepseek"
         self._model = "deepseek-flash"
         self._messages = []
+        self.context_tokens = 0
         self._thinking = False
         self._search = False
         self.send_handler = None

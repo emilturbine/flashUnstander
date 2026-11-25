@@ -32,12 +32,12 @@ def _mix(a, b, t):
     return a + (b - a) * t[..., None]
 
 
-@lru_cache(maxsize=5)
-def _albedo(kind):
+@lru_cache(maxsize=32)
+def _albedo(kind, seed):
     height, width = 192, 384
     y, x = np.indices((height, width), dtype=np.float32)
     u, v = x / width, (y + .5) / height
-    rng = np.random.default_rng(1871 + kind)
+    rng = np.random.default_rng(1871 + kind + 7919*seed)
     warp = _noise(u, v, 5, rng) - .5
     u = u + .055 * warp
     broad = _noise(u, v, 4, rng)
@@ -67,6 +67,10 @@ def _albedo(kind):
         colors = ((119, 65, 48), (231, 167, 123)) if kind == 2 else ((49, 91, 147), (146, 211, 224))
         base = _mix(*colors, _smooth((terrain - .25) * 2.3))
         base *= (.92 + .16 * fine[..., None])
+    if kind:
+        # Vary pigment balance independently from the terrain seed.
+        pigment = rng.uniform(.76, 1.24, 3)
+        base = np.clip(base * pigment, 0, 255)
     return base.astype(np.float32)
 
 
@@ -91,7 +95,7 @@ def _geometry(size, kind):
                         z*cos(axial_tip) - local_y*sin(axial_tip))
     u = (np.arctan2(local_x, local_z) / (2*pi) + .5).astype(np.float32)
     v = np.arcsin(np.clip(local_y, -1, 1)) / pi + .5
-    height = _albedo(kind).shape[0]
+    height = 192
     row = np.clip(v * height - .5, 0, height-1)
     iy = row.astype(np.int32)
     return x, y, z, coverage, u, iy, np.minimum(iy+1, height-1), (row-iy).astype(np.float32)[..., None]
@@ -126,13 +130,13 @@ def _rings(rgb, alpha, x, y, z, light, size):
     return combined / np.maximum(out_alpha[..., None], .0001), out_alpha
 
 
-def sphere(kind, radius, pixel_ratio, light, spin):
+def sphere(kind, radius, pixel_ratio, light, spin, seed=0):
     """Render a rotating textured sphere, including analytic limb coverage."""
     extent = _RING_EXTENT if kind == 3 else 1.
     # Bucket resolutions to reuse geometry throughout the expansion animation.
     size = min(256, max(32, 16 * ceil(2 * radius * extent * pixel_ratio / 16)))
     x, y, z, alpha, u, iy, jy, fy = _geometry(size, kind)
-    texture = _albedo(kind)
+    texture = _albedo(kind, seed)
     column = ((u - spin / (2*pi)) % 1) * texture.shape[1]
     ix = column.astype(np.int32) % texture.shape[1]
     jx = (ix + 1) % texture.shape[1]
@@ -146,7 +150,7 @@ def sphere(kind, radius, pixel_ratio, light, spin):
         lx, ly, lz = light
         incidence = x*lx + y*ly + z*lz
         diffuse = np.clip((incidence+.045)/1.045, 0, 1)**.68
-        rgb *= (.21 + .82*diffuse)[..., None]
+        rgb *= (.32 + .71*diffuse)[..., None]
         rim = (1-z)**2.5 * (.12 + .88*_smooth((incidence+.30)*2))
         tint = (64, 137, 203) if kind in (1, 4) else (151, 93, 50)
         rgb += rim[..., None] * np.asarray(tint, dtype=np.float32)

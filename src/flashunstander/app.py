@@ -23,6 +23,7 @@ from .storage import Store
 from .window_bridge import WindowBridge
 from .window_manager import WindowManager
 from .desktop import DesktopIntegration
+from .context import select_context
 from .control_ball import ControlBall
 from .control_bridge import ControlBridge
 from .formatting import format_message
@@ -153,9 +154,12 @@ class Controller(QObject):
             store = self.runtime.store
             self.conversation_id = (store.recent_conversation() if self.restore else None) or store.create_conversation()
             messages = store.messages(self.conversation_id)
+            context = select_context(messages, "", "", count_tokens,
+                                     budget=self.config["context_tokens"],
+                                     max_turns=self.config["context_turns"])
             self.event.emit(("history", [
                 (m["role"], m["content"], m["status"], bool(m.get("image_url"))) for m in messages
-            ]))
+            ], context.estimated_tokens))
         except Exception as exc:
             self.event.emit(("error", str(exc)))
             raise
@@ -219,7 +223,7 @@ class Controller(QObject):
                 image_url=images[0] if images else None, on_event=self.event.emit,
                 model=config["model"], parameters=parameters,
             )
-            self.event.emit(("context", f"上下文 {context.turns} 轮，文本约 {context.estimated_tokens} token（不含图片）"))
+            self.event.emit(("context", f"上下文 {context.turns} 轮，文本约 {context.estimated_tokens} token（不含图片）", context.estimated_tokens))
             await future
         except asyncio.CancelledError:
             pass
@@ -236,6 +240,7 @@ class Controller(QObject):
     def _on_event(self, event):
         if isinstance(event, tuple):
             if event[0] == "history":
+                self.bridge.context_tokens = event[2]
                 self.messages = [message_row(role, text, status=status, image=image)
                                  for role, text, status, image in event[1]]
                 self.bridge.set_messages(self.messages)
@@ -244,6 +249,7 @@ class Controller(QObject):
                 self.bridge.update_state(answer=self.answer, status="就绪", busy=False)
                 return
             if event[0] == "context":
+                self.bridge.context_tokens = event[2]
                 self.bridge.update_state(status=event[1])
                 return
             if self.messages and self.messages[-1]["status"] in {"queued", "streaming"}:
