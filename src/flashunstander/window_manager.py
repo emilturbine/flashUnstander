@@ -30,7 +30,11 @@ class WindowManager(QObject):
             raise RuntimeError("无法加载悬浮窗口")
         window = engine.rootObjects()[0]
         window.newWindowRequested.connect(lambda: self.create_window(window))
-        window.activeChanged.connect(lambda: self._activated(window))
+        window.activeChanged.connect(lambda: self._activated(window, bridge))
+        bridge.replyCompleted.connect(lambda: bridge.register_reply_completion(
+            window.isVisible() and window.isActive()
+            and window.windowState() != Qt.WindowState.WindowMinimized
+        ))
         window.visibleChanged.connect(self._visibility_changed)
         self._place(window, source or self.last_window)
         self.windows.append((window, engine, bridge, controller))
@@ -93,9 +97,11 @@ class WindowManager(QObject):
                     return
         window.setFramePosition(QPoint(area.left(), area.top()))
 
-    def _activated(self, window):
+    def _activated(self, window, bridge):
         if window.isActive():
             self.last_window = window
+            if window.isVisible() and window.windowState() != Qt.WindowState.WindowMinimized:
+                bridge.mark_reply_read()
 
     @Slot(bool)
     def _visibility_changed(self, visible):

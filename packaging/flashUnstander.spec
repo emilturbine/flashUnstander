@@ -4,6 +4,7 @@ from importlib.util import find_spec
 
 packaging = Path(SPECPATH)
 source = packaging.parent / "src"
+qml = source / "flashunstander" / "qml"
 conda_libraries = Path(sys.base_prefix) / "Library" / "bin"
 # A venv backed by Conda has no conda-meta, so PyInstaller may miss these DLLs.
 runtime_binaries = [
@@ -16,7 +17,9 @@ analysis = Analysis(
     [str(packaging / "launcher.py")],
     pathex=[str(source)],
     binaries=runtime_binaries,
-    datas=[(str(source / "flashunstander" / "qml"), "flashunstander/qml")],
+    datas=[(str(qml / name), "flashunstander/qml") for name in (
+        "Main.qml", "GpuSphereScene.qml", "sphere.frag.qsb",
+    )],
     hiddenimports=["PySide6.QtQuick", "keyring.backends.Windows"],
 )
 archive = PYZ(analysis.pure)

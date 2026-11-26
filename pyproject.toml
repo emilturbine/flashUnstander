@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flashunstander"
-version = "0.1.3"
+version = "0.2.0"
 requires-python = ">=3.13"
 dependencies = ["PySide6>=6.12,<7", "numpy>=2.3,<3", "openai>=3,<4", "keyring>=25,<26", "tiktoken>=0.14,<1", "pywin32>=312; sys_platform == 'win32'"]
 
@@ -15,7 +15,7 @@ dev = ["pytest>=9,<10", "pyinstaller>=6,<7"]
 flashunstander = "flashunstander.app:main"
 
 [tool.setuptools.package-data]
-flashunstander = ["qml/*.qml"]
+flashunstander = ["qml/*.qml", "qml/*.qsb"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

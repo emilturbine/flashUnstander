@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 
 class ControlBridge(QObject):
     windowsChanged = Signal()
+    conversationDeleted = Signal(str)
 
     def __init__(self, manager, quit_app, open_settings=None):
         super().__init__()
@@ -21,6 +22,12 @@ class ControlBridge(QObject):
     def visibleCount(self):
         return sum(window.isVisible() for window, *_ in self._manager.windows)
 
+    def planetAuroraOpacity(self, index):
+        return self._manager.windows[index][2].aurora_opacity
+
+    def conversationId(self, index):
+        return self._manager.windows[index][3].conversation_id
+
     def contextTokens(self, index):
         return self._manager.windows[index][2].context_tokens
 
@@ -36,9 +43,13 @@ class ControlBridge(QObject):
         return 0 <= index < self.windowCount and not self._manager.windows[index][2].busy
 
     def deleteWindow(self, index):
-        if self.canDeleteWindow(index):
-            return self._manager.delete_window(index)
-        return False
+        if not self.canDeleteWindow(index):
+            return False
+        identifier = self.conversationId(index)
+        deleted = self._manager.delete_window(index)
+        if deleted and identifier:
+            self.conversationDeleted.emit(identifier)
+        return deleted
 
     @Slot()
     def openRecent(self):

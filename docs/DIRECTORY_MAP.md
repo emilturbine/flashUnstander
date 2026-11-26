@@ -1,36 +1,31 @@
 # 目录地图
 
-- `pyproject.toml`：依赖、构建及测试配置。
-- `README.md`：开发版启动和配置说明。
-- `src/flashunstander/app.py`、`__main__.py`：应用入口、后台线程和窗口控制器。
-- `src/flashunstander/storage.py`：SQLite 会话、消息及分页。
-- `src/flashunstander/context.py`：完整问答轮次筛选和输入预算。
-- `src/flashunstander/scheduler.py`：异步 FIFO 调度及取消。
-- `src/flashunstander/mock_stream.py`：测试用模拟流事件。
-- `src/flashunstander/provider.py`：OpenAI 和 DeepSeek 流式接口适配。
-- `src/flashunstander/service.py`：会话、存储和调度协调。
-- `src/flashunstander/desktop.py`：Windows 全局热键及托盘。
-- `src/flashunstander/control_bridge.py`：中控操作及窗口可见状态接口。
-- `src/flashunstander/control_ball.py`：默认中控球外观及圆形点击范围。
-- `src/flashunstander/settings_dialog.py`：中控设置表单和上下文默认值。
-- `src/flashunstander/formatting.py`：离线 Markdown、JSON 和基础 LaTeX 渲染。
-- `src/flashunstander/window_manager.py`：窗口实例与控制器绑定。
-- `src/flashunstander/window_bridge.py`、`qml/Main.qml`：单窗口接口及界面初稿。
-- `tests/test_storage_context.py`：持久化、分页及上下文预算测试。
-- `tests/test_scheduler.py`：并发、排队、取消及会话排他测试。
-- `tests/test_mock_stream.py`：模拟流测试。
-- `tests/test_provider.py`、`tests/test_service.py`：供应商适配及会话服务测试。
-- `tests/test_formatting.py`：消息格式转换及外部资源过滤。
-- `tests/desktop_smoke.py`：单独运行的 Windows 可见窗口、模拟并发及热键冲突验证。
-- `tests/exit_smoke.py`：验证正常退出释放实例锁和 SQLite 文件句柄。
-- `examples/README.md`：自定义窗口接口示例说明。
-- `docs/PROGRESS.md`：阶段进度、设计决定和测试授权记录。
-- `scripts/build-windows.ps1`：根目录单文件 EXE 和可选安装包的构建入口。
-- `packaging/`：冻结程序入口、PyInstaller 配置、Inno Setup 脚本和 Windows 依赖清单。
-- `.venv/`：本地虚拟环境，不提交。
-- `.scratch/`、`build/`、`dist/`：临时文件及构建产物，不提交。
+| 位置 | 内容 |
+| --- | --- |
+| `src/flashunstander/` | 应用入口、会话、模型接口、Windows 托盘和全局热键。 |
+| `src/flashunstander/qml/` | Qt Quick 问答窗口、GPU 星系场景和球体着色器。 |
+| `tests/` | 自动化测试，覆盖会话、渲染、纹理缓存等行为。 |
+| `tests/windows/` | Windows 原生窗口、全局热键和正常退出的验证脚本。 |
+| `examples/classic_qt/` | 可独立运行的经典 Qt 界面开发示例。 |
+| `examples/reference/` | 星系界面的 HTML 参考原型。 |
+| `packaging/` | Windows 锁定依赖、PyInstaller 配置、入口和可选的 Inno Setup 配置。 |
+| `scripts/build-windows.ps1` | 构建入口。中间文件写入 `build/pyinstaller/`，成功后把 EXE 放到根目录。 |
+| `docs/screenshots/` | README 使用的项目截图。 |
 
-运行数据和凭据不存放于项目目录。
+星系布局和交互在 `control_ball.py`。`orbit.py` 计算轨道，`closeup.py` 计算近景摄影机，`gpu_spheres.py` 连接 Qt Quick 场景。纹理生成和缓存分别位于 `cosmic.py`、`earth_material.py`、`ring_material.py` 和 `texture_cache.py`。
 
-- `examples/classic_qt/`：可独立启动的经典 Qt 开发示例。
-- `examples/reference/`：星系界面的 HTML 参考原型。
+修改球体着色器 `sphere.frag` 后，在仓库根目录用同一套 Qt 工具更新运行时使用的 `sphere.frag.qsb`。
+
+```powershell
+.\.venv\Lib\site-packages\PySide6\qsb.exe --glsl "100 es,120,150" --hlsl 50 --msl 12 -o src/flashunstander/qml/sphere.frag.qsb src/flashunstander/qml/sphere.frag
+```
+
+Windows 验证脚本在桌面会话内运行。
+
+```powershell
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe tests/windows/desktop_smoke.py
+.\.venv\Scripts\python.exe tests/windows/exit_smoke.py
+```
+
+本地依赖、构建目录和根目录 EXE 由 Git 忽略。模型设置与历史使用 `%LOCALAPPDATA%\flashUnstander`，凭据使用 Windows 凭据管理器。

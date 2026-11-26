@@ -52,12 +52,6 @@ class Store:
         )
         return [row[0] for row in rows]
 
-    def recent_conversation(self) -> str | None:
-        row = self.connection.execute(
-            "SELECT id FROM conversations ORDER BY rowid DESC LIMIT 1"
-        ).fetchone()
-        return row[0] if row else None
-
     def delete_conversation(self, conversation_id: str):
         with self.connection:
             for table in ("runs", "messages", "conversations"):

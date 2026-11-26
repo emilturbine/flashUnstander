@@ -35,9 +35,15 @@ def _mix(a, b, t):
 
 @lru_cache(maxsize=32)
 def _albedo(kind, seed):
-    height, width = 192, 384
-    y, x = np.indices((height, width), dtype=np.float32)
-    u, v = x / width, (y + .5) / height
+    return _generate_albedo(kind, seed, 192)
+
+
+def _generate_albedo(kind, seed, height, *, gpu_texture=False, rows=None):
+    width = 2 * height
+    start, stop = (0, height) if rows is None else rows
+    y, x = np.indices((stop - start, width), dtype=np.float32)
+    y += start
+    u, v = (x + (.5 if gpu_texture else 0)) / width, (y + .5) / height
     rng = np.random.default_rng(1871 + kind + 7919*seed)
     warp = _noise(u, v, 5, rng) - .5
     u = u + .055 * warp
@@ -72,6 +78,10 @@ def _albedo(kind, seed):
         # Vary pigment balance independently from the terrain seed.
         pigment = rng.uniform(.76, 1.24, 3)
         base = np.clip(base * pigment, 0, 255)
+    if gpu_texture:
+        grain = .64 * _noise(u, v, 151, rng) + .36 * _noise(u, v, 257, rng)
+        strength = .11 if kind in (1, 3) else .15
+        base = np.clip(base * (1 + (grain - .5)*strength)[..., None], 0, 255)
     return base.astype(np.float32)
 
 
@@ -132,22 +142,17 @@ def _rings(rgb, alpha, x, y, z, light, size, opacity, color):
 
 
 @lru_cache(maxsize=128)
-def _ring_schedule(seed, cycle):
-    rng = Random((seed + 1) * 8191 + cycle * 131071)
-    start = rng.uniform(0, 24)
-    duration = rng.uniform(11, 20)
+def ring_for_conversation(conversation_id):
+    if conversation_id is None:
+        return None
+    rng = Random(conversation_id)
+    if rng.random() >= .30:
+        return None
     warm = rng.random()
     pale = (221, 220, 214)
     brown = (166, 126, 89)
     color = tuple(round(a + (b-a)*warm) for a, b in zip(pale, brown))
-    return start, duration, color
-
-
-def ring_state(seed, seconds):
-    cycle, phase = divmod(seconds + seed*9.1, 48)
-    start, duration, color = _ring_schedule(seed, int(cycle))
-    fade = max(0., min(1., (phase-start)/1.4, (start+duration-phase)/1.4))
-    return fade*fade*(3-2*fade), color
+    return 1., color
 
 
 def sphere(kind, radius, pixel_ratio, light, spin, seed=0, *, brightness=1., shadow_light=.36, ring=None):

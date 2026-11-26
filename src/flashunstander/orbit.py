@@ -6,19 +6,13 @@ from math import cos, pi, sin, sqrt
 
 @dataclass(frozen=True)
 class Orbit:
-    lane: float
     eccentricity: float
     cos_node: float
     sin_node: float
     cos_inclination: float
     sin_inclination: float
-    mean_motion: float
 
-    def axis(self, expansion):
-        return 61 + 24*self.lane + (1 + 22*self.lane)*expansion
-
-    def position(self, anomaly, expansion, axis=None):
-        axis = self.axis(expansion) if axis is None else axis
+    def position(self, anomaly, axis):
         major = axis * (cos(anomaly) - self.eccentricity)
         minor = axis * sqrt(1 - self.eccentricity**2) * sin(anomaly)
         vertical = minor * self.cos_inclination
@@ -36,13 +30,9 @@ class Orbit:
 
 @lru_cache(maxsize=64)
 def orbit_for(index):
-    # A low-discrepancy sequence gives new sessions stable, distinct lanes.
-    lane = (.25 + index * .61803398875) % 1
     node = -.34 + .10*sin(2.1*index)
     inclination = 1.05 + .12*cos(1.8*index)
-    motion = .31 * (62 / (62 + 46*lane))**1.5
-    return Orbit(lane, .055, cos(node), sin(node),
-                 cos(inclination), sin(inclination), motion)
+    return Orbit(.055, cos(node), sin(node), cos(inclination), sin(inclination))
 
 
 @dataclass(frozen=True)
@@ -55,7 +45,7 @@ class PlanetMaterial:
 PLANET_MATERIALS = (
     PlanetMaterial(4.8, 2 / 3, .55),  # Earth-like ocean and continents
     PlanetMaterial(5.5, .96 * (2 / 3), .64),   # Dense rocky desert
-    PlanetMaterial(1.1, 1.07 * 1.25, .48),  # Ringed gas giant
+    PlanetMaterial(1.1, 1.07 * 1.25, .48),  # Gas giant
     PlanetMaterial(1.7, 1.03, .51),  # Ice giant
 )
 
@@ -90,6 +80,22 @@ def project(x, y, z, camera=620.):
 def guide_points(index):
     """Cache a unit ellipse; hover scales it before perspective projection."""
     orbit = orbit_for(index)
-    axis = orbit.axis(0)
-    return [tuple(value / axis for value in orbit.position(i*pi/36, 0))
-            for i in range(73)]
+    return tuple(orbit.position(i*pi/36, 1.) for i in range(73))
+
+# Close-up coordinates are measured in Earth radii; overview uses screen units.
+AU_IN_EARTH_RADII = 23_455.
+PHYSICAL_STAR_RADIUS = 109.
+_PHYSICAL_RADII = (1., .53, 11.2, 3.9)
+_PHYSICAL_AXES_AU = (.39, .72, 1.52, 5.20, 9.58, 19.2, 30.1)
+
+
+def physical_planet_radius(index, tokens):
+    material = PLANET_MATERIALS[index % len(PLANET_MATERIALS)]
+    growth = planet_radius(tokens, 0, material) / planet_radius(0, 0, material)
+    return _PHYSICAL_RADII[index % len(_PHYSICAL_RADII)] * growth
+
+
+def physical_orbit_axis(index):
+    if index < len(_PHYSICAL_AXES_AU):
+        return _PHYSICAL_AXES_AU[index] * AU_IN_EARTH_RADII
+    return _PHYSICAL_AXES_AU[-1] * (1 + .45*(index - len(_PHYSICAL_AXES_AU) + 1)) * AU_IN_EARTH_RADII

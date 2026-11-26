@@ -8,4 +8,8 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
+.env
+.env.*
+!.env.example
+/settings.json
 /flashUnstander.exe

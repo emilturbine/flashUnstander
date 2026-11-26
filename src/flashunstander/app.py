@@ -285,6 +285,8 @@ class Controller(QObject):
             self._finish_message("complete" if completed else "truncated")
             status = "完成" if completed else "回答达到长度限制"
             self.bridge.update_state(answer=self.answer, status=status, busy=False, metrics=f"排队 {self.queue_seconds or 0:.2f}s · 耗时 {elapsed:.2f}s · 输入 {event.input_tokens if event.input_tokens is not None else '未知'} · 输出 {event.output_tokens if event.output_tokens is not None else '未知'}")
+            if completed:
+                self.bridge.replyCompleted.emit()
         elif event.kind in {"cancelled", "failed"}:
             self._finish_message(event.kind)
             self.bridge.update_state(answer=self.answer, status="已停止" if event.kind == "cancelled" else "请求失败", busy=False)
@@ -332,6 +334,9 @@ def main(*, launcher_class=ControlBall, qml_path=None, data_name="flashUnstander
         desktop.quitRequested.connect(controls.quit)
         ball = launcher_class(app, controls, shortcut_available=desktop.register_hotkey())
         history_ids = asyncio.run_coroutine_threadsafe(load_history_ids(), runtime.loop).result()
+        retain_textures = getattr(ball, "retain_planet_textures", None)
+        if retain_textures is not None:
+            retain_textures(history_ids)
         for conversation_id in history_ids:
             manager.create_window(conversation_id=conversation_id, visible=False)
         ball.show()

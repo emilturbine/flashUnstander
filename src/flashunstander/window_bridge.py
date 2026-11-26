@@ -1,10 +1,13 @@
 """Stable Qt boundary between a window and the conversation controller."""
+from time import monotonic
+
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from .provider import supports_search, supports_thinking
 
 
 class WindowBridge(QObject):
+    replyCompleted = Signal()
     messagesChanged = Signal()
     sendRequested = Signal(str, str)
     stopRequested = Signal()
@@ -22,9 +25,48 @@ class WindowBridge(QObject):
         self._model = "deepseek-flash"
         self._messages = []
         self.context_tokens = 0
+        self.unread_reply = False
+        self._aurora_started = 0.
+        self._aurora_until = 0.
+        self._aurora_entry_level = 0.
+        self._aurora_exit_level = 1.
         self._thinking = False
         self._search = False
         self.send_handler = None
+
+    def register_reply_completion(self, in_foreground):
+        now = monotonic()
+        self._aurora_entry_level = self._aurora_opacity(now)
+        self._aurora_started = now
+        self.unread_reply = not in_foreground
+        self._aurora_until = now + 5
+        self._aurora_exit_level = 1.
+
+    def mark_reply_read(self):
+        if self.unread_reply:
+            now = monotonic()
+            self._aurora_exit_level = self._aurora_opacity(now)
+            self._aurora_until = now + 1
+            self.unread_reply = False
+
+    @staticmethod
+    def _fade(progress):
+        progress = max(0., min(1., progress))
+        return progress * progress * (3 - 2 * progress)
+
+    def _aurora_opacity(self, now):
+        if self.unread_reply or now < self._aurora_until - 1:
+            fade_in = self._fade(now - self._aurora_started)
+            return self._aurora_entry_level + (1 - self._aurora_entry_level) * fade_in
+        return self._aurora_exit_level * self._fade(self._aurora_until - now)
+
+    @property
+    def aurora_opacity(self):
+        return self._aurora_opacity(monotonic())
+
+    @property
+    def aurora_active(self):
+        return self.unread_reply or monotonic() < self._aurora_until
 
     @Property("QVariantList", notify=messagesChanged)
     def messages(self):

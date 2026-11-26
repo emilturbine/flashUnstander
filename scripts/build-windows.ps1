@@ -5,6 +5,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $projectPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+$buildRoot = Join-Path $projectRoot 'build\pyinstaller'
+$staging = Join-Path $buildRoot 'dist'
+$programName = 'flashUnstander.exe'
 $originalPath = $env:PATH
 Push-Location -LiteralPath $projectRoot
 try {
@@ -23,8 +26,9 @@ try {
         $pythonBase
         (Join-Path $pythonBase 'Library\bin')
     ) -join ';'
-    & $projectPython -m PyInstaller --clean --noconfirm --distpath . --workpath build packaging/flashUnstander.spec
+    & $projectPython -m PyInstaller --clean --noconfirm --distpath $staging --workpath (Join-Path $buildRoot 'work') packaging/flashUnstander.spec
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
+    Move-Item -LiteralPath (Join-Path $staging $programName) -Destination (Join-Path $projectRoot $programName) -Force
 
     if ($InnoCompiler) {
         & $InnoCompiler "/DAppVersion=$appVersion" packaging/flashUnstander.iss
