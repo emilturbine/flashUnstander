@@ -3,6 +3,7 @@
 from math import atan2, ceil, cos, degrees, exp, floor, hypot, sin, tau
 from os import environ
 from random import Random
+from sys import platform
 from time import monotonic
 
 from PySide6.QtCore import Qt, QTimer, QRectF, QPoint, QPointF, QSettings
@@ -23,6 +24,10 @@ from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
     QMenu, QMessageBox, QPushButton, QSlider,
 )
+
+if platform == "win32":
+    import win32con
+    import win32gui
 
 
 STANDBY_STAR_RADIUS = 58
@@ -56,6 +61,7 @@ class ControlBall(QPushButton):
         super().__init__("F")
         self.controls = controls
         self._appearance_settings = QSettings("flashUnstander", "Appearance")
+        self.always_on_top = self._appearance_settings.value("alwaysOnTop", True, type=bool)
         self._appearance = {
             key: max(low, min(high, self._appearance_settings.value(key, default, type=int)))
             for key, _, low, high, default in APPEARANCE_CONTROLS
@@ -120,6 +126,13 @@ class ControlBall(QPushButton):
                 layer.deleteLater()
         self._starfield = Starfield(self._appearance["starfieldOpacity"] / 50)
         app.aboutToQuit.connect(self._starfield.close)
+        self._restack_timer = QTimer(self, singleShot=True, interval=0)
+        self._restack_timer.timeout.connect(self._refresh_window_stack)
+        if platform == "win32":
+            app.focusWindowChanged.connect(self._queue_window_stack)
+            app.applicationStateChanged.connect(self._queue_window_stack)
+            self._stack_watchdog = QTimer(self, interval=1000)
+            self._stack_watchdog.timeout.connect(self._check_window_stack)
         self._viewport_key = None
         self._orbit_paths = {}
         self._sync_viewport()
@@ -226,12 +239,70 @@ class ControlBall(QPushButton):
         super().showEvent(event)
         self._sync_starfield()
         self._sync_gpu_layer()
+        self._queue_window_stack()
+        if platform == "win32":
+            self._stack_watchdog.start()
 
     def hideEvent(self, event):
+        self._restack_timer.stop()
+        if platform == "win32":
+            self._stack_watchdog.stop()
         self._starfield.hide()
         if self._gpu_layer is not None:
             self._gpu_layer.hide()
         super().hideEvent(event)
+
+    def _queue_window_stack(self):
+        if self.isVisible():
+            self._restack_timer.start()
+
+    def set_always_on_top(self, enabled):
+        self.always_on_top = enabled
+        self._appearance_settings.setValue("alwaysOnTop", enabled)
+        self._queue_window_stack()
+
+    def _refresh_window_stack(self):
+        if platform == "win32" and not self.always_on_top:
+            self._check_window_stack()
+        else:
+            self._restore_window_stack()
+
+    def _visible_layers(self):
+        return tuple(layer for layer in (self._starfield, self._gpu_layer, self)
+                     if layer is not None and layer.isVisible())
+
+    def _check_window_stack(self):
+        handles = [int(layer.winId()) for layer in reversed(self._visible_layers())]
+        if any(bool(win32gui.GetWindowLong(handle, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOPMOST)
+               != self.always_on_top
+               for handle in handles):
+            self._restore_window_stack()
+            return
+        # A native raise can separate the layers within either Z-order band.
+        if any(win32gui.GetWindow(front, win32con.GW_HWNDNEXT) != behind
+               for front, behind in zip(handles, handles[1:])):
+            self._restore_window_stack()
+
+    def _restore_window_stack(self):
+        if not self.isVisible() or QApplication.activePopupWidget() or QApplication.activeModalWidget():
+            return
+        layers = self._visible_layers()
+        if platform != "win32":
+            for layer in layers:
+                layer.raise_()
+            return
+        handles = [int(layer.winId()) for layer in layers]
+        flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+        if self.always_on_top:
+            for handle in handles:
+                win32gui.SetWindowPos(handle, win32con.HWND_TOPMOST, 0, 0, 0, 0, flags)
+        else:
+            # Keep the launcher at its normal-window position and place its
+            # rendering layers directly behind it without taking focus.
+            launcher = handles[-1]
+            win32gui.SetWindowPos(launcher, win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+            for front, behind in zip(reversed(handles[1:]), reversed(handles[:-1])):
+                win32gui.SetWindowPos(behind, front, 0, 0, 0, 0, flags)
 
     def moveEvent(self, event):
         super().moveEvent(event)
@@ -260,17 +331,14 @@ class ControlBall(QPushButton):
         layer.setGeometry(self.geometry())
         if self.isVisible() and not layer.isVisible():
             layer.show()
-            layer.raise_()
-            self.raise_()
+            self._queue_window_stack()
 
     def _sync_starfield(self):
         self._starfield.setGeometry(self.geometry())
         if self._starfield.opacity > 0 and self.isVisible():
             if not self._starfield.isVisible():
                 self._starfield.show()
-                if self._gpu_layer is not None:
-                    self._gpu_layer.raise_()
-                self.raise_()
+                self._queue_window_stack()
             self._starfield.update()
         else:
             self._starfield.hide()
@@ -838,6 +906,16 @@ class ControlBall(QPushButton):
         dialog = QDialog(self)
         dialog.setWindowTitle("星系外观设置")
         dialog.setMinimumWidth(360)
+        dialog.setStyleSheet("""
+            QSlider { min-height: 24px; }
+            QSlider::groove:horizontal {
+                height: 6px; border-radius: 3px; background: palette(mid);
+            }
+            QSlider::handle:horizontal {
+                width: 16px; margin: -5px 0; border-radius: 8px;
+                background: palette(highlight); border: 1px solid palette(window-text);
+            }
+        """)
         layout = QFormLayout(dialog)
         sliders = []
         for key, title, low, high, default in APPEARANCE_CONTROLS:
@@ -847,7 +925,7 @@ class ControlBall(QPushButton):
             value = QLabel(self._appearance_value(key, slider.value()))
             value.setMinimumWidth(38)
             row = QHBoxLayout()
-            row.addWidget(slider)
+            row.addWidget(slider, 1)
             row.addWidget(value)
             layout.addRow(title, row)
             slider.valueChanged.connect(

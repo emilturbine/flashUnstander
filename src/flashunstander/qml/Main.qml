@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
 
@@ -15,10 +16,66 @@ ApplicationWindow {
     property color foreground: lightTheme ? "#182334" : "#edf1f8"
     property color surface: lightTheme ? "#ffffff" : "#171b24"
     property color muted: lightTheme ? "#516078" : "#aebbd0"
+    palette.highlight: lightTheme ? "#3c6cac" : "#825720"
+    palette.highlightedText: "#ffffff"
     color: lightTheme ? "#e9edf4" : "#0d0f14"
     property string imagePath: ""
     signal newWindowRequested()
     onClosing: function(close) { close.accepted = false; window.hide() }
+
+    component ChatButton: Basic.Button {
+        id: button
+        hoverEnabled: true
+        leftPadding: 9
+        rightPadding: 9
+        topPadding: 5
+        bottomPadding: 5
+        contentItem: Text {
+            text: button.text
+            font: button.font
+            color: button.checked ? (window.lightTheme ? "#153d79" : "#fff0c2")
+                                  : (button.enabled ? window.foreground : window.muted)
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            radius: 6
+            color: {
+                if (button.checked)
+                    return window.lightTheme ? (button.down ? "#a9cafb" : "#d5e6ff")
+                                             : (button.down ? "#76541f" : "#56401d")
+                if (!button.enabled)
+                    return window.surface
+                if (button.down || button.hovered)
+                    return window.lightTheme ? "#d9e5f5" : "#303b4d"
+                return window.lightTheme ? "#f7f9fc" : "#222a37"
+            }
+            border.width: button.visualFocus ? 2 : 1
+            border.color: button.checked || button.visualFocus
+                ? (window.lightTheme ? "#4979c5" : "#e6b551")
+                : (window.lightTheme ? "#b9c7d9" : "#46536a")
+        }
+    }
+
+    component ChatScrollBar: Basic.ScrollBar {
+        id: bar
+        policy: ScrollBar.AsNeeded
+        visible: size < 0.999
+        hoverEnabled: true
+        implicitWidth: 12
+        padding: 2
+        minimumSize: Math.min(1, 26 / Math.max(height - 2 * padding, 1))
+        contentItem: Rectangle {
+            radius: 4
+            color: bar.pressed || bar.hovered
+                ? (window.lightTheme ? "#526988" : "#becce0")
+                : (window.lightTheme ? "#7589a5" : "#8294af")
+        }
+        background: Rectangle {
+            radius: 6
+            color: window.lightTheme ? "#dce4ee" : "#202937"
+        }
+    }
 
     ListModel { id: messageModel }
 
@@ -90,19 +147,20 @@ ApplicationWindow {
                     onPressed: window.startSystemMove()
                 }
             }
-            Button { text: "+"; visible: false; onClicked: window.newWindowRequested() }
-            Button { text: window.lightTheme ? "深色" : "浅色"; onClicked: window.lightTheme = !window.lightTheme }
-            Button { text: "─"; Accessible.name: "最小化"; onClicked: window.showMinimized() }
-            Button { text: "×"; Accessible.name: "关闭"; onClicked: window.close() }
+            ChatButton { text: window.lightTheme ? "深色" : "浅色"; onClicked: window.lightTheme = !window.lightTheme }
+            ChatButton { text: "─"; Accessible.name: "最小化"; onClicked: window.showMinimized() }
+            ChatButton { text: "×"; Accessible.name: "关闭"; onClicked: window.close() }
         }
-        ScrollView {
+        Basic.ScrollView {
             id: answers
             objectName: "answerScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            rightPadding: 14
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: ChatScrollBar { objectName: "answerBar" }
             property bool followBottomOnChange: true
 
             function scrollToBottom() {
@@ -150,7 +208,7 @@ ApplicationWindow {
                                     color: window.muted
                                     font.pixelSize: 11
                                 }
-                                ToolButton {
+                                ChatButton {
                                     visible: !message.fromUser && message.trace !== ""
                                     text: message.expanded ? "▾ 思考和搜索过程" : "▸ 思考和搜索过程"
                                     onClicked: {
@@ -158,7 +216,7 @@ ApplicationWindow {
                                         message.expanded = !message.expanded
                                     }
                                 }
-                                TextArea {
+                                Basic.TextArea {
                                     objectName: "processDetails"
                                     visible: !message.fromUser && message.expanded && message.trace !== ""
                                     Layout.fillWidth: true
@@ -171,7 +229,7 @@ ApplicationWindow {
                                     padding: 0
                                     background: null
                                 }
-                                TextArea {
+                                Basic.TextArea {
                                     visible: text !== ""
                                     Layout.fillWidth: true
                                     text: !message.fromUser && message.richBody ? message.richBody : message.body
@@ -202,7 +260,7 @@ ApplicationWindow {
             }
         }
         Label { visible: window.imagePath !== ""; text: "已选择图片"; color: window.muted }
-        ScrollView {
+        Basic.ScrollView {
             id: promptScroll
             objectName: "promptScroll"
             Layout.fillWidth: true
@@ -210,8 +268,10 @@ ApplicationWindow {
             Layout.minimumHeight: 34
             Layout.maximumHeight: 34
             clip: true
+            rightPadding: 14
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical: ChatScrollBar { objectName: "promptBar" }
             function showCaret() {
                 const view = contentItem
                 const caret = prompt.cursorRectangle
@@ -220,7 +280,7 @@ ApplicationWindow {
                     : bottom > view.contentY + view.height ? bottom - view.height : view.contentY
                 view.contentY = Math.max(0, Math.min(target, view.contentHeight - view.height))
             }
-            TextArea {
+            Basic.TextArea {
                 id: prompt
                 objectName: "prompt"
                 placeholderText: "输入问题…"
@@ -238,7 +298,7 @@ ApplicationWindow {
             }
         }
         RowLayout {
-            ToolButton {
+            ChatButton {
                 text: window.imagePath === "" ? "图片" : "移除图片"
                 enabled: !bridge.busy
                 onClicked: {
@@ -248,14 +308,16 @@ ApplicationWindow {
                         window.imagePath = ""
                 }
             }
-            ToolButton {
+            ChatButton {
+                objectName: "thinkingOption"
                 text: "思考"
                 checkable: true
                 checked: bridge.thinkingEnabled
                 enabled: bridge.thinkingAvailable && !bridge.busy
                 onClicked: bridge.setThinking(checked)
             }
-            ToolButton {
+            ChatButton {
+                objectName: "searchOption"
                 text: "搜索"
                 checkable: true
                 checked: bridge.searchEnabled
@@ -263,8 +325,8 @@ ApplicationWindow {
                 onClicked: bridge.setSearch(checked)
             }
             Item { Layout.fillWidth: true }
-            Button { text: "停止"; visible: bridge.busy; onClicked: bridge.stop() }
-            Button { text: "发送"; enabled: !bridge.busy && (prompt.text.trim() !== "" || window.imagePath !== ""); onClicked: window.submitPrompt() }
+            ChatButton { text: "停止"; visible: bridge.busy; onClicked: bridge.stop() }
+            ChatButton { text: "发送"; enabled: !bridge.busy && (prompt.text.trim() !== "" || window.imagePath !== ""); onClicked: window.submitPrompt() }
         }
         Label { text: bridge.status + (bridge.metrics ? "  ·  " + bridge.metrics : ""); color: window.muted; Layout.fillWidth: true; elide: Text.ElideRight }
     }

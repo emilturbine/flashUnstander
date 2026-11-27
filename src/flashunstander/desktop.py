@@ -61,6 +61,14 @@ class DesktopIntegration(QObject):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.showRequested.emit()
 
+    def add_topmost_toggle(self, checked, on_toggled):
+        action = QAction("星系始终置顶", self.menu)
+        action.setCheckable(True)
+        action.setChecked(checked)
+        action.toggled.connect(on_toggled)
+        self.menu.insertAction(self.menu.actions()[-1], action)
+        return action
+
     def register_hotkey(self, modifiers=0x0005, key=0x57):
         """Register a Win32 modifier mask and virtual key; default Alt+Shift+W.
 

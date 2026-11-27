@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtQuick import QQuickItem
 import win32con
@@ -67,6 +67,7 @@ def check_hotkey_conflict(desktop):
     finally:
         user32.UnregisterHotKey(None, competing_id)
     assert desktop.register_hotkey(modifiers, competing_key)
+    return (competing_key << 16) | modifiers
 
 
 def visual_children(item):
@@ -87,6 +88,52 @@ def check_native_windows(ball, window):
     assert window.findChild(QQuickItem, "windowDragRegion").width() > 0
     assert sum(item.objectName() == "windowResizeRegion"
                for item in visual_children(window.contentItem())) == 8
+
+
+def check_launcher_stacking(app, ball, desktop):
+    launcher = int(ball.winId())
+    foreground = win32gui.GetForegroundWindow()
+    win32gui.SetWindowPos(launcher, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+    handles = [int(layer.winId()) for layer in reversed(ball._visible_layers())]
+
+    def ordered(topmost):
+        return all(bool(win32gui.GetWindowLong(handle, win32con.GWL_EXSTYLE)
+                        & win32con.WS_EX_TOPMOST) == topmost for handle in handles) and all(
+            win32gui.GetWindow(front, win32con.GW_HWNDNEXT) == behind
+            for front, behind in zip(handles, handles[1:])
+        )
+
+    wait_for(app, lambda: ordered(True), "launcher layers recover native topmost order")
+    toggle = desktop.add_topmost_toggle(ball.always_on_top, ball.set_always_on_top)
+    assert toggle.isChecked()
+    toggle.trigger()
+    wait_for(app, lambda: ordered(False), "tray toggle releases the whole launcher stack")
+    win32gui.SetWindowPos(launcher, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+    wait_for(app, lambda: ordered(False), "launcher respects the saved unpinned mode")
+    assert not ball._appearance_settings.value("alwaysOnTop", True, type=bool)
+    toggle.trigger()
+    wait_for(app, lambda: ordered(True), "tray toggle restores topmost mode")
+    assert win32gui.GetForegroundWindow() == foreground, "restacking must not take keyboard focus"
+
+
+def check_option_colors(window, bridge):
+    for name, toggle in (("thinkingOption", bridge.setThinking), ("searchOption", bridge.setSearch)):
+        button = window.findChild(QQuickItem, name)
+        background = button.property("background")
+        assert button.isVisible() and button.width() > 0
+        window.setProperty("lightTheme", False)
+        toggle(False)
+        idle = background.property("color")
+        toggle(True)
+        assert button.property("checked")
+        dark_selected = background.property("color")
+        assert dark_selected != idle
+        window.setProperty("lightTheme", True)
+        assert background.property("color") != dark_selected
+        toggle(False)
+    window.setProperty("lightTheme", False)
 
 
 def check_ball_drag(ball, controls):
@@ -122,6 +169,10 @@ def check_scroll(app, window, bridge):
                              for item in (prompt_scroll, answer_scroll)), "scrollable text")
     wait_for(app, lambda: prompt_scroll.property("contentY") > 0, "input follows caret")
     wait_for(app, lambda: answer_scroll.property("atYEnd"), "answer follows latest message")
+    QTest.qWait(750)
+    for name in ("answerBar", "promptBar"):
+        bar = window.findChild(QQuickItem, name)
+        assert bar.isVisible() and bar.property("contentItem").opacity() == 1
     answer_scroll.setProperty("contentY", 50)
     assert answer_scroll.property("contentY") == 50
     bridge.set_messages([dict(row, text=long_text + "\n新增内容")])
@@ -135,11 +186,12 @@ def main():
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
     with TemporaryDirectory() as directory:
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, directory)
         runtime = Runtime(Path(directory))
         desktop = DesktopIntegration(app)
         try:
-            check_hotkey_conflict(desktop)
-            assert desktop.register_hotkey(), "Alt+Shift+W registration"
+            hotkey_params = check_hotkey_conflict(desktop)
             manager = WindowManager(lambda bridge: Controller(app, bridge, runtime))
             dialogs = []
             controls = ControlBridge(manager, app.quit, lambda: dialogs.append(SettingsDialog(runtime)))
@@ -162,7 +214,7 @@ def main():
             check_ball_drag(ball, controls)
             for expected in range(1, 4):
                 win32api.PostThreadMessage(win32api.GetCurrentThreadId(), win32con.WM_HOTKEY,
-                                           desktop._hotkey_id, (0x57 << 16) | 0x0005)
+                                           desktop._hotkey_id, hotkey_params)
                 wait_for(app, lambda: controls.windowCount == expected, "global hotkey opened a new chat")
             ball.click()
             windows = manager.windows
@@ -175,6 +227,8 @@ def main():
                 assert not window.flags() & Qt.WindowType.WindowStaysOnTopHint
             last, _, last_bridge, _ = windows[-1]
             check_native_windows(ball, last)
+            check_launcher_stacking(app, ball, desktop)
+            check_option_colors(last, last_bridge)
             check_scroll(app, last, last_bridge)
             original_color = last.property("color")
             last.setProperty("lightTheme", True)

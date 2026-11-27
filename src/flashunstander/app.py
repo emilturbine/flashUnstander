@@ -333,6 +333,8 @@ def main(*, launcher_class=ControlBall, qml_path=None, data_name="flashUnstander
         desktop.showRequested.connect(controls.showAll)
         desktop.quitRequested.connect(controls.quit)
         ball = launcher_class(app, controls, shortcut_available=desktop.register_hotkey())
+        if os.name == "nt" and isinstance(ball, ControlBall):
+            desktop.add_topmost_toggle(ball.always_on_top, ball.set_always_on_top)
         history_ids = asyncio.run_coroutine_threadsafe(load_history_ids(), runtime.loop).result()
         retain_textures = getattr(ball, "retain_planet_textures", None)
         if retain_textures is not None:
